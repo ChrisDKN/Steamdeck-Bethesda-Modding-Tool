@@ -92,6 +92,7 @@ def get_default_game_paths():
             "name": "Skyrim Special Edition",
             "data_path": os.path.join(steam_common, "Skyrim Special Edition/Data"),
             "plugins_path": os.path.join(steam_compat, "489830/pfx/drive_c/users/steamuser/AppData/Local/Skyrim Special Edition"),
+            "default_plugins_path": os.path.join(steam_compat, "489830/pfx/drive_c/users/steamuser/AppData/Local/Skyrim Special Edition"),
             "launcher_name": "SkyrimSELauncher.exe",
             "script_extender_name": "skse64_loader.exe",
             "script_extender_download": "https://skse.silverlock.org/"
@@ -100,6 +101,7 @@ def get_default_game_paths():
             "name": "Skyrim",
             "data_path": os.path.join(steam_common, "Skyrim/Data"),
             "plugins_path": os.path.join(steam_compat, "72850/pfx/drive_c/users/steamuser/AppData/Local/Skyrim"),
+            "default_plugins_path": os.path.join(steam_compat, "72850/pfx/drive_c/users/steamuser/AppData/Local/Skyrim"),
             "launcher_name": "SkyrimLauncher.exe",
             "script_extender_name": "skse_loader.exe",
             "script_extender_download": "https://skse.silverlock.org/"
@@ -108,6 +110,7 @@ def get_default_game_paths():
             "name": "Fallout 4",
             "data_path": os.path.join(steam_common, "Fallout 4/Data"),
             "plugins_path": os.path.join(steam_compat, "377160/pfx/drive_c/users/steamuser/AppData/Local/Fallout4"),
+            "default_plugins_path": os.path.join(steam_compat, "377160/pfx/drive_c/users/steamuser/AppData/Local/Fallout4"),
             "launcher_name": "Fallout4Launcher.exe",
             "script_extender_name": "f4se_loader.exe",
             "script_extender_download": "https://f4se.silverlock.org/"
@@ -116,6 +119,7 @@ def get_default_game_paths():
             "name": "Fallout 3",
             "data_path": os.path.join(steam_common, "Fallout 3/Data"),
             "plugins_path": os.path.join(steam_compat, "22300/pfx/drive_c/users/steamuser/AppData/Local/Fallout3"),
+            "default_plugins_path": os.path.join(steam_compat, "22300/pfx/drive_c/users/steamuser/AppData/Local/Fallout3"),
             "launcher_name": "Fallout3Launcher.exe",
             "script_extender_name": "fose_loader.exe",
             "script_extender_download": "https://fose.silverlock.org/"
@@ -124,6 +128,7 @@ def get_default_game_paths():
             "name": "New Vegas",
             "data_path": os.path.join(steam_common, "Fallout New Vegas/Data"),
             "plugins_path": os.path.join(steam_compat, "22380/pfx/drive_c/users/steamuser/AppData/Local/FalloutNV"),
+            "default_plugins_path": os.path.join(steam_compat, "22380/pfx/drive_c/users/steamuser/AppData/Local/FalloutNV"),
             "launcher_name": "FalloutNVLauncher.exe",
             "script_extender_name": "nvse_loader.exe",
             "script_extender_download": "https://github.com/xNVSE/NVSE/releases"
@@ -132,6 +137,7 @@ def get_default_game_paths():
             "name": "Oblivion",
             "data_path": os.path.join(steam_common, "Oblivion/Data"),
             "plugins_path": os.path.join(steam_compat, "22330/pfx/drive_c/users/steamuser/AppData/Local/Oblivion"),
+            "default_plugins_path": os.path.join(steam_compat, "22330/pfx/drive_c/users/steamuser/AppData/Local/Oblivion"),
             "launcher_name": "OblivionLauncher.exe",
             "script_extender_name": "obse_loader.exe",
             "script_extender_download": "https://obse.silverlock.org/"
@@ -2196,11 +2202,15 @@ class MO2MergerGUI(QMainWindow):
                 break
 
         # Update data_path in config to match detected location
-        self._update_game_data_path(selected_game, game_folder)
+        self._update_game_data_path(selected_game, os.path.join(game_folder, "Data"))
 
-        # Update plugins_path if a custom wine prefix was selected
+        # Update plugins_path: use custom prefix if provided, otherwise reset to default
         if custom_result and custom_result.get("plugins_path"):
             self._update_game_plugins_path(selected_game, custom_result["plugins_path"])
+        elif custom_result and selected_game_data:
+            default_pp = selected_game_data.get("default_plugins_path")
+            if default_pp:
+                self._update_game_plugins_path(selected_game, default_pp)
 
         # Create subfolder named "<game name> MO2"
         folder = os.path.join(game_folder, f"{selected_game} MO2")
