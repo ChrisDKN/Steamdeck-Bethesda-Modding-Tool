@@ -139,6 +139,20 @@ def get_default_game_paths():
     ]}
 
 
+def get_prefix_from_plugins_path(plugins_path):
+    """Extract the Wine prefix path from a full plugins_path.
+
+    For example, given:
+      /home/deck/.local/share/Steam/steamapps/compatdata/377160/pfx/drive_c/users/steamuser/AppData/Local/Fallout4
+    Returns:
+      /home/deck/.local/share/Steam/steamapps/compatdata/377160
+    """
+    pfx_index = plugins_path.find("/pfx/")
+    if pfx_index != -1:
+        return plugins_path[:pfx_index]
+    return plugins_path
+
+
 def get_config_path():
     """Get the config file path - uses user's home directory for writability."""
     user_config_dir = os.path.join(os.path.expanduser("~"), ".config", "mo2manager")
@@ -1238,8 +1252,6 @@ class MO2MergerGUI(QMainWindow):
         for display_name, folder_path in self.mo2_instances:
             self.mo2_combo.addItem(display_name, folder_path)
 
-        # Add manual option
-        self.mo2_combo.addItem("Manual...", None)
         self.mo2_combo.currentIndexChanged.connect(self.on_mo2_combo_changed)
         mo2_select_layout.addWidget(self.mo2_combo)
 
@@ -1317,16 +1329,6 @@ class MO2MergerGUI(QMainWindow):
         self.se_status_label = QLabel("")
         mo2_layout.addWidget(self.se_status_label)
 
-        # Manual path input (shown when "Manual..." is selected or no instances found)
-        self.mo2_manual_layout = QHBoxLayout()
-        self.mo2_path_edit = QLineEdit()
-        self.mo2_path_edit.setPlaceholderText("Enter or browse for Mod Organizer 2 folder...")
-        self.mo2_path_edit.textChanged.connect(self.on_mo2_path_changed)
-        mo2_browse_btn = QPushButton("Browse...")
-        mo2_browse_btn.clicked.connect(self.browse_mo2_folder)
-        self.mo2_manual_layout.addWidget(self.mo2_path_edit)
-        self.mo2_manual_layout.addWidget(mo2_browse_btn)
-        mo2_layout.addLayout(self.mo2_manual_layout)
 
         # Status labels for mods and overwrite folders
         self.mods_status_label = QLabel("Mods folder: Not found")
@@ -1341,18 +1343,10 @@ class MO2MergerGUI(QMainWindow):
         if self.mo2_instances:
             # Auto-select first instance
             self.mo2_combo.setCurrentIndex(0)
-            self.mo2_path_edit.setText(self.mo2_instances[0][1])
+            self.mo2_path = self.mo2_instances[0][1]
             self.mo2_path_label.setText(f"Path: {self.mo2_instances[0][1]}")
-            self.mo2_path_edit.setVisible(False)
-            # Hide browse button too
-            for i in range(self.mo2_manual_layout.count()):
-                widget = self.mo2_manual_layout.itemAt(i).widget()
-                if widget:
-                    widget.setVisible(False)
         else:
-            # No instances found, show manual input
-            self.mo2_combo.setCurrentIndex(0)  # "Manual..."
-            self.mo2_path_label.setText("Path: No instances found - enter path manually")
+            self.mo2_path_label.setText("Path: No instances found - use Rescan or Add Instance")
 
         # Profile Selection Group
         profile_group = QGroupBox("Profile Selection")
@@ -1390,8 +1384,6 @@ class MO2MergerGUI(QMainWindow):
                 if os.path.isdir(game_folder):
                     self.game_combo.addItem(game["name"], game)
 
-        # Add "Custom..." option
-        self.game_combo.addItem("Custom...", None)
         self.game_combo.currentIndexChanged.connect(self.on_game_changed)
         game_select_layout.addWidget(self.game_combo)
 
@@ -1413,12 +1405,6 @@ class MO2MergerGUI(QMainWindow):
         self.game_run_exe_btn.clicked.connect(self.run_exe_in_game_prefix)
         game_select_layout.addWidget(self.game_run_exe_btn)
 
-        # Change Prefix button
-        self.change_prefix_btn = QPushButton("Change Prefix")
-        self.change_prefix_btn.setToolTip("Select a different wine prefix for the selected game")
-        self.change_prefix_btn.clicked.connect(self.change_game_prefix)
-        game_select_layout.addWidget(self.change_prefix_btn)
-
         # Downgrade button (Fallout 3 only)
         self.downgrade_btn = QPushButton("Downgrade")
         self.downgrade_btn.setToolTip("Downgrade Fallout 3 using the Updated Unofficial Fallout 3 Patch patcher")
@@ -1435,27 +1421,30 @@ class MO2MergerGUI(QMainWindow):
         self.data_output_edit = QLineEdit()
         self.data_output_edit.setPlaceholderText("Select output location for merged Data folder...")
         self.data_output_edit.textChanged.connect(self.update_build_button)
+        self.data_output_edit.editingFinished.connect(self._validate_data_path)
         data_output_browse_btn = QPushButton("Browse...")
         data_output_browse_btn.clicked.connect(self.browse_data_output)
         data_output_layout.addWidget(self.data_output_edit)
         data_output_layout.addWidget(data_output_browse_btn)
         output_layout.addLayout(data_output_layout)
 
-        # plugins.txt output
+        # Wine prefix display
         plugins_output_layout = QHBoxLayout()
-        plugins_output_layout.addWidget(QLabel("plugins.txt:"))
+        plugins_output_layout.addWidget(QLabel("Wine Prefix:"))
         self.plugins_output_edit = QLineEdit()
-        self.plugins_output_edit.setPlaceholderText("Select location for plugins.txt symlink...")
-        plugins_output_browse_btn = QPushButton("Browse...")
-        plugins_output_browse_btn.clicked.connect(self.browse_plugins_output)
+        self.plugins_output_edit.setPlaceholderText("Wine prefix location (eg. ~/.local/share/Steam/steamapps/compatdata/72850)")
+        self.plugins_output_edit.setReadOnly(True)
+        self.change_prefix_btn = QPushButton("Change Prefix")
+        self.change_prefix_btn.setToolTip("Select a different Wine prefix folder (the folder containing pfx/)")
+        self.change_prefix_btn.clicked.connect(self.change_game_prefix)
         plugins_output_layout.addWidget(self.plugins_output_edit)
-        plugins_output_layout.addWidget(plugins_output_browse_btn)
+        plugins_output_layout.addWidget(self.change_prefix_btn)
         output_layout.addLayout(plugins_output_layout)
 
         # Set initial state - show paths from first game if available
         if self.game_paths:
             self.data_output_edit.setText(self.game_paths[0].get("data_path", ""))
-            self.plugins_output_edit.setText(self.game_paths[0].get("plugins_path", ""))
+            self.plugins_output_edit.setText(get_prefix_from_plugins_path(self.game_paths[0].get("plugins_path", "")))
             self.downgrade_btn.setVisible(self.game_paths[0].get("name") == "Fallout 3")
 
         output_group.setLayout(output_layout)
@@ -1541,25 +1530,10 @@ class MO2MergerGUI(QMainWindow):
         """Handle MO2 instance selection change."""
         folder_path = self.mo2_combo.currentData()
 
-        if folder_path is None:  # "Manual..." option
-            # Show manual input fields
-            self.mo2_path_edit.setVisible(True)
-            for i in range(self.mo2_manual_layout.count()):
-                widget = self.mo2_manual_layout.itemAt(i).widget()
-                if widget:
-                    widget.setVisible(True)
-            self.mo2_path_edit.clear()
-            self.mo2_path_edit.setFocus()
-            self.mo2_path_label.setText("Path: Enter path manually")
-        else:
-            # Hide manual input fields and set path
-            self.mo2_path_edit.setVisible(False)
-            for i in range(self.mo2_manual_layout.count()):
-                widget = self.mo2_manual_layout.itemAt(i).widget()
-                if widget:
-                    widget.setVisible(False)
-            self.mo2_path_edit.setText(folder_path)
+        if folder_path:
+            self.mo2_path = folder_path
             self.mo2_path_label.setText(f"Path: {folder_path}")
+            self.validate_mo2_folder()
 
     def rescan_mo2_instances(self):
         """Rescan for MO2 instances and update the combo box."""
@@ -1575,8 +1549,6 @@ class MO2MergerGUI(QMainWindow):
 
         for display_name, folder_path in self.mo2_instances:
             self.mo2_combo.addItem(display_name, folder_path)
-
-        self.mo2_combo.addItem("Manual...", None)
 
         # Try to restore previous selection
         restored = False
@@ -1594,9 +1566,7 @@ class MO2MergerGUI(QMainWindow):
             self.mo2_combo.setCurrentIndex(0)
             self.on_mo2_combo_changed(0)
         elif not self.mo2_instances:
-            # No instances found, show manual input
-            self.mo2_combo.setCurrentIndex(0)
-            self.on_mo2_combo_changed(0)
+            self.mo2_path_label.setText("Path: No instances found - use Rescan or Add Instance")
 
         # Show message about scan results
         if self.mo2_instances:
@@ -1610,34 +1580,13 @@ class MO2MergerGUI(QMainWindow):
                 self,
                 "Scan Complete",
                 "No Mod Organizer 2 installations found.\n"
-                "Please enter the path manually."
+                "Use 'Add Instance' to install one."
             )
 
     def refresh_gui(self):
         """Refresh the GUI: re-validate MO2 folder, reload mod list and plugin list."""
         self.validate_mo2_folder()
         self.append_log("GUI refreshed.")
-
-    def browse_mo2_folder(self):
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "Select Mod Organizer 2 Folder",
-            os.path.expanduser("~")
-        )
-        if folder:
-            # Switch to manual mode if not already
-            manual_index = self.mo2_combo.count() - 1
-            if self.mo2_combo.currentIndex() != manual_index:
-                self.mo2_combo.blockSignals(True)
-                self.mo2_combo.setCurrentIndex(manual_index)
-                self.mo2_combo.blockSignals(False)
-                # Show manual input fields
-                self.mo2_path_edit.setVisible(True)
-                for i in range(self.mo2_manual_layout.count()):
-                    widget = self.mo2_manual_layout.itemAt(i).widget()
-                    if widget:
-                        widget.setVisible(True)
-            self.mo2_path_edit.setText(folder)
 
     def run_mo2(self):
         """Launch ModOrganizer.exe using the game's Proton version and prefix."""
@@ -2022,10 +1971,24 @@ class MO2MergerGUI(QMainWindow):
         # Update the game combo's stored data and rebuild it to reflect changes
         self._refresh_game_combo()
 
+    def _update_game_data_path(self, game_name, new_data_path):
+        """Update data_path in config for the given game."""
+        for game in self.game_paths:
+            if game.get("name") == game_name:
+                if game.get("data_path") == new_data_path:
+                    return
+                game["data_path"] = new_data_path
+                break
+        save_game_paths(self.game_paths)
+        self.append_log(f"Updated data_path for {game_name}: {new_data_path}")
+        self._refresh_game_combo()
+
     def _update_game_plugins_path(self, game_name, new_plugins_path):
         """Update plugins_path in config to reflect a custom wine prefix."""
         for game in self.game_paths:
             if game.get("name") == game_name:
+                if game.get("plugins_path") == new_plugins_path:
+                    return
                 game["plugins_path"] = new_plugins_path
                 break
         save_game_paths(self.game_paths)
@@ -2043,7 +2006,6 @@ class MO2MergerGUI(QMainWindow):
                 game_folder = os.path.dirname(data_path)
                 if os.path.isdir(game_folder):
                     self.game_combo.addItem(game["name"], game)
-        self.game_combo.addItem("Custom...", None)
         # Restore previous selection
         for i in range(self.game_combo.count()):
             if self.game_combo.itemText(i) == current_name:
@@ -2054,7 +2016,7 @@ class MO2MergerGUI(QMainWindow):
         game_data = self.game_combo.currentData()
         if game_data:
             self.data_output_edit.setText(game_data.get("data_path", ""))
-            self.plugins_output_edit.setText(game_data.get("plugins_path", ""))
+            self.plugins_output_edit.setText(get_prefix_from_plugins_path(game_data.get("plugins_path", "")))
 
     def _start_mo2_download(self, folder, selected_game_data):
         """Start the MO2 download/install worker for a given folder and game."""
@@ -2302,16 +2264,6 @@ class MO2MergerGUI(QMainWindow):
                 f"Failed to install Mod Organizer 2:\n\n{result}"
             )
 
-    def on_mo2_path_changed(self, path):
-        self.mo2_path = path
-        # Update path label when manually entering a path
-        if hasattr(self, 'mo2_path_label'):
-            if path:
-                self.mo2_path_label.setText(f"Path: {path}")
-            else:
-                self.mo2_path_label.setText("Path: Enter path manually")
-        self.validate_mo2_folder()
-
     def validate_mo2_folder(self):
         # Check if UI is fully initialized
         if not hasattr(self, 'profile_combo'):
@@ -2452,7 +2404,7 @@ class MO2MergerGUI(QMainWindow):
                         self.game_combo.blockSignals(False)
                         # Update the output paths
                         self.data_output_edit.setText(game.get("data_path", ""))
-                        self.plugins_output_edit.setText(game.get("plugins_path", ""))
+                        self.plugins_output_edit.setText(get_prefix_from_plugins_path(game.get("plugins_path", "")))
                         # Update downgrade button visibility
                         self.downgrade_btn.setVisible(game_name == "Fallout 3")
                         self.update_build_button()
@@ -2467,24 +2419,15 @@ class MO2MergerGUI(QMainWindow):
         )
         if folder:
             self.data_output_edit.setText(folder)
-            # Switch to custom if user browses and path doesn't match current game
-            game_data = self.game_combo.currentData()
-            if game_data and folder != game_data.get("data_path", ""):
-                custom_index = self.game_combo.count() - 1
-                self.game_combo.blockSignals(True)
-                self.game_combo.setCurrentIndex(custom_index)
-                self.game_combo.blockSignals(False)
+            self._validate_data_path()
             self.update_build_button()
 
     def on_game_changed(self, index):
         """Handle game selection change - updates both Data and plugins.txt paths."""
         game_data = self.game_combo.currentData()
-        if game_data is None:  # Custom option
-            self.data_output_edit.clear()
-            self.plugins_output_edit.clear()
-        else:
+        if game_data:
             self.data_output_edit.setText(game_data.get("data_path", ""))
-            self.plugins_output_edit.setText(game_data.get("plugins_path", ""))
+            self.plugins_output_edit.setText(get_prefix_from_plugins_path(game_data.get("plugins_path", "")))
 
         # Show Downgrade button only for Fallout 3
         is_fallout3 = game_data is not None and game_data.get("name") == "Fallout 3"
@@ -2888,21 +2831,40 @@ class MO2MergerGUI(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to launch patcher:\n{str(e)}")
 
-    def browse_plugins_output(self):
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "Select Location for plugins.txt",
-            os.path.expanduser("~")
-        )
-        if folder:
-            self.plugins_output_edit.setText(folder)
-            # Switch to custom if user browses and path doesn't match current game
-            game_data = self.game_combo.currentData()
-            if game_data and folder != game_data.get("plugins_path", ""):
-                custom_index = self.game_combo.count() - 1
-                self.game_combo.blockSignals(True)
-                self.game_combo.setCurrentIndex(custom_index)
-                self.game_combo.blockSignals(False)
+    def _validate_data_path(self):
+        """Validate the Data folder path and update config.
+
+        The path must end with '<game folder>/Data' (e.g. 'Fallout 4/Data').
+        The expected suffix is derived from the default data_path for the
+        selected game. If invalid, revert to default.
+        """
+        path = self.data_output_edit.text().rstrip("/")
+        game_data = self.game_combo.currentData()
+        if not game_data:
+            return
+
+        game_name = game_data.get("name", "")
+
+        # Get the expected suffix from the default config (e.g. "Fallout 4/Data")
+        defaults = get_default_game_paths()
+        default_path = ""
+        expected_suffix = ""
+        for g in defaults["games"]:
+            if g.get("name") == game_name:
+                default_path = g.get("data_path", "")
+                # Extract "<game folder>/Data" from the end of the default path
+                parts = default_path.rsplit("/", 2)
+                if len(parts) >= 2:
+                    expected_suffix = parts[-2] + "/" + parts[-1]
+                break
+
+        if not expected_suffix or not path.endswith(expected_suffix):
+            self.data_output_edit.blockSignals(True)
+            self.data_output_edit.setText(default_path)
+            self.data_output_edit.blockSignals(False)
+            self._update_game_data_path(game_name, default_path)
+        else:
+            self._update_game_data_path(game_name, path)
 
     def update_build_button(self):
         # Update Script Extender buttons (created early, so always safe to check)
@@ -2984,7 +2946,8 @@ class MO2MergerGUI(QMainWindow):
         # Get paths
         modlist_path = os.path.join(self.profiles_folder, self.selected_profile, "modlist.txt")
         data_output = self.data_output_edit.text()
-        plugins_dest = self.plugins_output_edit.text()
+        game_data = self.game_combo.currentData()
+        plugins_dest = game_data.get("plugins_path", "") if game_data else ""
         datafolder_dest = os.path.join(self.mods_folder, "DataFolder")
         needs_datafolder_creation = not os.path.isdir(datafolder_dest)
 
