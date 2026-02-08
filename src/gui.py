@@ -1252,7 +1252,7 @@ class MO2MergerGUI(QMainWindow):
                     return
                 game["data_path"] = new_data_path
                 break
-        utils.ave_game_paths(self.game_paths)
+        utils.save_game_paths(self.game_paths)
         self.append_log(f"Updated data_path for {game_name}: {new_data_path}")
         self._refresh_game_combo()
 
@@ -1264,7 +1264,7 @@ class MO2MergerGUI(QMainWindow):
                     return
                 game["plugins_path"] = new_plugins_path
                 break
-        utils.ave_game_paths(self.game_paths)
+        utils.save_game_paths(self.game_paths)
         self.append_log(f"Updated plugins_path for {game_name}: {new_plugins_path}")
         self._refresh_game_combo()
 
