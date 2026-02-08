@@ -1,0 +1,57 @@
+Bethesda game modding on the Steam Deck:
+
+- This tool will allow you to easily setup and run mod organiser 2 to manage your mods/plugins
+- It allows us to automatically build the Data folder by hard linking all of the required files set by the modlist.txt
+    The purpose of this is to skip Mod organisers virtual file system which is very very slow on the steam deck. Boot times should be much faster with larger mod lists
+    It also means we don't need to load mod organiser 2 every time we want to launch the game
+    You will need to rebuild the data folder whenever you make a change within mod organiser, This should only take a few seconds.
+- It will replace the default skyrim launcher exe with the script extender exe, meaning when we hit play in steam/gaming mode, it will launch the game with script extender
+
+Usage:
+
+- Install the game (Supported currently are: Skyrim Special Edition, Skyrim, Fallout 4, Fallout 3 , Fallout NV, Oblivion)
+    Important - You will need to run the game once before proceeding to allow the game to generate the files it needs. You can exit when at the title screen.
+    Important - If running Fallout 3 you will need to downgrade the game, you should do this first before proceeding (See below on how to do that)
+- Click add instance in the application and select where you want the folder to go, it will create a folder within that folder
+    This is where your Mod organiser 2 and mods are stored
+- The is an option to download the script extender version for the selected game, Then you can install it using the app
+- Select the instance in the application and click Run MO2, MO2 will run using the same proton version and prefix the game uses.
+- Add/manage your mods and plugins as you normally would with Mod organiser
+- We do not run the game via Mod Organiser 2 anymore, this is just to manage the mods
+    If using mods like pandora behaviour engine or bethini you would still add and run these via mod organiser
+- Click Build Data folder
+    This will first create a DataFolder mod that sits at the bottom of you mod load order, It just moves the current files in the games data folder to Mod Organisers mods folder, This is needed to build the Data folder without issues
+    This will then read Modlist.txt and hard link all of the needed files to the games Data folder
+    If using community shaders for Skyrim it will copy (not hardlink) the Shadercache folder to the Data folder as community shaders will write new shaders to the Data folder
+    The games default launcher will be backed up and replaced with the script extender exe (if it exists)
+    It will symlink the plugins.txt to the correct location within the prefix used by the game
+- Restore Data folder will undo the Build Data folder function and restore the game back to normal
+    Installing or Uninstalling script extender via the application will also do this.
+- Play the game through steam/gaming mode as normal, since we are not using mod organisers Virtual file system the game should boot/load much faster (With smaller mod lists this wont be as noticable but still worth it)
+- The process for other games is exactly the same, you need to create a new instance for each game.
+- The application should auto detect games installed in the steam/common folder as well as games installed on SD cards.
+    if the game is not located in these folder (If the game was obtained via the high seas), I've included a small guide under custom locations at the bottom to deal with that.
+
+Adding winedll overrides:
+- Some mods may require that you set winedll overrides for them to function (it's rare but can happen). Normally we can add winedll overrides using the WINEDLLOVERRIDES command as a steam launch argument. The app provides a run winecfg button where you can also set them without needing a long steam launch command. Simply click run winecfg and go to the libraries tab where you can add an override and set it to native/builtin/both (Most DLL overrides use both). This removes the need for the steam launch argument and the game will launch with the DLL override
+
+Installing windows dependencies:
+- You can run proton tricks or directly run an exe if a mod requires a windows dependency that is not already in the prefix
+
+When you add/remove/change a mod:
+- whenever you make a change within Mod Organiser, you need to click build data folder again
+
+Downgrading Fallout 3
+- Fallout 3 will be required to be downgraded to use the latest version of script extender
+- When the Fallout 3 instance is selected a downgrade button will apear on the application
+- It will provide a link to the patcher used to downgrade the game via Nexus
+- Once downloaded select the downloaded zip file and the application will auto extract it to the game directory and run the exe. Patching should only take a couple seconds
+
+Custom Locations:
+- If the game is not in the default steam common folder or on an SD card follow these steps
+- Add an instance and select custom location
+- Find and select the location of the game folder. It should auto detect what game it is.
+- It will ask if you want to use a custom prefix location, Select Yes
+- locate the wine prefix used by the game (The folder containing the PFX folder)
+- The config in /home/deck/.config/MO2Manager/ will update with the custom locations, if you need to move anything you can edit this file or create a new instance.
+
