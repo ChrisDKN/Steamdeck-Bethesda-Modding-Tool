@@ -9,12 +9,8 @@ import sys
 import json
 import shutil
 import subprocess
-import ssl
-import certifi
-import urllib.request
 import tempfile
 import zipfile
-from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -23,688 +19,11 @@ from PyQt6.QtWidgets import (
     QInputDialog, QListWidget, QListWidgetItem, QSplitter, QFrame,
     QCheckBox, QAbstractItemView, QDialog, QDialogButtonBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-
-def get_clean_env():
-    """Get a clean environment for launching external processes like Proton.
-
-    When running inside an AppImage, environment variables like LD_LIBRARY_PATH
-    and QT_PLUGIN_PATH are modified to point to the AppImage's internal libraries.
-    These can interfere with external applications like Proton/Wine.
-    """
-    env = os.environ.copy()
-
-    # Check if running inside an AppImage
-    if 'APPIMAGE' in env or 'APPDIR' in env:
-        # Remove or clean AppImage-specific paths from library paths
-        appdir = env.get('APPDIR', '')
-
-        # Clean LD_LIBRARY_PATH
-        if 'LD_LIBRARY_PATH' in env:
-            paths = env['LD_LIBRARY_PATH'].split(':')
-            cleaned = [p for p in paths if appdir not in p and '/tmp/.mount_' not in p]
-            if cleaned:
-                env['LD_LIBRARY_PATH'] = ':'.join(cleaned)
-            else:
-                del env['LD_LIBRARY_PATH']
-
-        # Clean QT_PLUGIN_PATH
-        if 'QT_PLUGIN_PATH' in env:
-            paths = env['QT_PLUGIN_PATH'].split(':')
-            cleaned = [p for p in paths if appdir not in p and '/tmp/.mount_' not in p]
-            if cleaned:
-                env['QT_PLUGIN_PATH'] = ':'.join(cleaned)
-            else:
-                del env['QT_PLUGIN_PATH']
-
-        # Clean PATH
-        if 'PATH' in env:
-            paths = env['PATH'].split(':')
-            cleaned = [p for p in paths if appdir not in p and '/tmp/.mount_' not in p]
-            env['PATH'] = ':'.join(cleaned) if cleaned else '/usr/bin:/bin'
-
-        # Remove AppImage-specific variables
-        for var in ['APPDIR', 'APPIMAGE', 'ARGV0', 'OWD']:
-            env.pop(var, None)
-
-    return env
-
-
-def get_app_path():
-    """Get the application base path, handling both frozen (PyInstaller) and normal execution."""
-    if getattr(sys, 'frozen', False):
-        # Running as bundled app (PyInstaller)
-        return sys._MEIPASS
-    else:
-        # Running as script
-        return os.path.dirname(os.path.abspath(__file__))
-
-
-def get_default_game_paths():
-    """Return the default game configuration data."""
-    home = os.path.expanduser("~")
-    steam_common = os.path.join(home, ".local/share/Steam/steamapps/common")
-    steam_compat = os.path.join(home, ".local/share/Steam/steamapps/compatdata")
-    return {"games": [
-        {
-            "name": "Skyrim Special Edition",
-            "data_path": os.path.join(steam_common, "Skyrim Special Edition/Data"),
-            "plugins_path": os.path.join(steam_compat, "489830/pfx/drive_c/users/steamuser/AppData/Local/Skyrim Special Edition"),
-            "default_plugins_path": os.path.join(steam_compat, "489830/pfx/drive_c/users/steamuser/AppData/Local/Skyrim Special Edition"),
-            "launcher_name": "SkyrimSELauncher.exe",
-            "script_extender_name": "skse64_loader.exe",
-            "script_extender_download": "https://skse.silverlock.org/"
-        },
-        {
-            "name": "Skyrim",
-            "data_path": os.path.join(steam_common, "Skyrim/Data"),
-            "plugins_path": os.path.join(steam_compat, "72850/pfx/drive_c/users/steamuser/AppData/Local/Skyrim"),
-            "default_plugins_path": os.path.join(steam_compat, "72850/pfx/drive_c/users/steamuser/AppData/Local/Skyrim"),
-            "launcher_name": "SkyrimLauncher.exe",
-            "script_extender_name": "skse_loader.exe",
-            "script_extender_download": "https://skse.silverlock.org/"
-        },
-        {
-            "name": "Fallout 4",
-            "data_path": os.path.join(steam_common, "Fallout 4/Data"),
-            "plugins_path": os.path.join(steam_compat, "377160/pfx/drive_c/users/steamuser/AppData/Local/Fallout4"),
-            "default_plugins_path": os.path.join(steam_compat, "377160/pfx/drive_c/users/steamuser/AppData/Local/Fallout4"),
-            "launcher_name": "Fallout4Launcher.exe",
-            "script_extender_name": "f4se_loader.exe",
-            "script_extender_download": "https://f4se.silverlock.org/"
-        },
-        {
-            "name": "Fallout 3",
-            "data_path": os.path.join(steam_common, "Fallout 3/Data"),
-            "plugins_path": os.path.join(steam_compat, "22300/pfx/drive_c/users/steamuser/AppData/Local/Fallout3"),
-            "default_plugins_path": os.path.join(steam_compat, "22300/pfx/drive_c/users/steamuser/AppData/Local/Fallout3"),
-            "launcher_name": "Fallout3Launcher.exe",
-            "script_extender_name": "fose_loader.exe",
-            "script_extender_download": "https://fose.silverlock.org/"
-        },
-        {
-            "name": "Fallout 3 GOTY",
-            "data_path": os.path.join(steam_common, "Fallout 3 goty/Data"),
-            "plugins_path": os.path.join(steam_compat, "22370/pfx/drive_c/users/steamuser/AppData/Local/Fallout3"),
-            "default_plugins_path": os.path.join(steam_compat, "22370/pfx/drive_c/users/steamuser/AppData/Local/Fallout3"),
-            "launcher_name": "Fallout3Launcher.exe",
-            "script_extender_name": "fose_loader.exe",
-            "script_extender_download": "https://fose.silverlock.org/"
-        },
-        {
-            "name": "New Vegas",
-            "data_path": os.path.join(steam_common, "Fallout New Vegas/Data"),
-            "plugins_path": os.path.join(steam_compat, "22380/pfx/drive_c/users/steamuser/AppData/Local/FalloutNV"),
-            "default_plugins_path": os.path.join(steam_compat, "22380/pfx/drive_c/users/steamuser/AppData/Local/FalloutNV"),
-            "launcher_name": "FalloutNVLauncher.exe",
-            "script_extender_name": "nvse_loader.exe",
-            "script_extender_download": "https://github.com/xNVSE/NVSE/releases"
-        },
-        {
-            "name": "Oblivion",
-            "data_path": os.path.join(steam_common, "Oblivion/Data"),
-            "plugins_path": os.path.join(steam_compat, "22330/pfx/drive_c/users/steamuser/AppData/Local/Oblivion"),
-            "default_plugins_path": os.path.join(steam_compat, "22330/pfx/drive_c/users/steamuser/AppData/Local/Oblivion"),
-            "launcher_name": "OblivionLauncher.exe",
-            "script_extender_name": "obse_loader.exe",
-            "script_extender_download": "https://obse.silverlock.org/"
-        }
-    ]}
-
-
-def get_prefix_from_plugins_path(plugins_path):
-    """Extract the Wine prefix path from a full plugins_path.
-
-    For example, given:
-      /home/deck/.local/share/Steam/steamapps/compatdata/377160/pfx/drive_c/users/steamuser/AppData/Local/Fallout4
-    Returns:
-      /home/deck/.local/share/Steam/steamapps/compatdata/377160
-    """
-    pfx_index = plugins_path.find("/pfx/")
-    if pfx_index != -1:
-        return plugins_path[:pfx_index]
-    return plugins_path
-
-
-def get_config_path():
-    """Get the config file path - uses user's home directory for writability."""
-    user_config_dir = os.path.join(os.path.expanduser("~"), ".config", "mo2manager")
-    user_config = os.path.join(user_config_dir, "game_paths.json")
-
-    # If user config exists, use it
-    if os.path.exists(user_config):
-        return user_config
-
-    # Generate default config
-    try:
-        os.makedirs(user_config_dir, exist_ok=True)
-        with open(user_config, 'w', encoding='utf-8') as f:
-            json.dump(get_default_game_paths(), f, indent=4)
-        return user_config
-    except (OSError, IOError):
-        return user_config
-
-
-def load_game_paths():
-    """Load game paths from the JSON config file."""
-    config_path = get_config_path()
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data.get("games", [])
-        except (json.JSONDecodeError, IOError):
-            pass
-    return []
-
-
-def save_game_paths(game_paths):
-    """Save game paths list back to the JSON config file."""
-    config_path = get_config_path()
-    try:
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump({"games": game_paths}, f, indent=4)
-    except (OSError, IOError):
-        pass
-
-
-def find_game_installs(game_paths):
-    """
-    Search for installed games by scanning for their launcher_name executable
-    across Steam common folders (internal + SD cards).
-    Returns a dict mapping game name to the game folder path found.
-    """
-    scan_roots = []
-    home = os.path.expanduser("~")
-
-    # Internal storage: Steam default library
-    steam_common = os.path.join(home, ".local/share/Steam/steamapps/common")
-    if os.path.isdir(steam_common):
-        scan_roots.append(steam_common)
-
-    # SD cards and other mounted media
-    media_dir = os.path.join("/run/media", os.path.basename(home))
-    if os.path.isdir(media_dir):
-        for entry in os.listdir(media_dir):
-            media_path = os.path.join(media_dir, entry)
-            if os.path.isdir(media_path):
-                scan_roots.append(media_path)
-
-    return _scan_for_launchers(game_paths, scan_roots)
-
-
-def _scan_for_launchers(game_paths, scan_roots):
-    """
-    Scan the given root directories for launcher_name executables.
-    Returns a dict mapping game name to the game folder path found.
-    """
-    # Build a lookup: lowercase launcher_name -> list of game dicts
-    launcher_lookup = {}
-    for game in game_paths:
-        launcher = game.get("launcher_name", "")
-        if launcher:
-            launcher_lookup.setdefault(launcher.lower(), []).append(game)
-
-    if not launcher_lookup:
-        return {}
-
-    skip_dirs = {'node_modules', '__pycache__', '.git', '.cache', 'Trash',
-                 '.build_venv', '.venv', 'venv'}
-    found = {}  # game name -> game folder path
-
-    for scan_root in scan_roots:
-        for root, dirs, files in os.walk(scan_root):
-            # Skip irrelevant directories to keep scanning fast
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
-
-            for filename in files:
-                lower_name = filename.lower()
-                if lower_name in launcher_lookup:
-                    game_folder = root  # folder containing the launcher
-                    for game in launcher_lookup[lower_name]:
-                        game_name = game.get("name", "")
-                        if game_name not in found:
-                            found[game_name] = game_folder
-        # Stop early if all games found
-        if len(found) >= len(game_paths):
-            break
-
-    return found
-
-
-def scan_for_mo2_instances():
-    """
-    Scan ~/.local, /run/media/deck/, and game directories for ModOrganizer.exe instances.
-    Returns a list of tuples: (display_name, folder_path)
-    """
-    instances = []
-    seen_paths = set()
-    home = os.path.expanduser("~")
-
-    # Collect scan roots: Steam common, SD cards, plus configured game directories
-    scan_roots = []
-
-    # Internal storage: Steam default library
-    steam_common = os.path.join(home, ".local/share/Steam/steamapps/common")
-    if os.path.isdir(steam_common):
-        scan_roots.append(steam_common)
-
-    # SD cards and other mounted media
-    media_dir = os.path.join("/run/media", os.path.basename(home))
-    if os.path.isdir(media_dir):
-        for entry in os.listdir(media_dir):
-            media_path = os.path.join(media_dir, entry)
-            if os.path.isdir(media_path):
-                scan_roots.append(media_path)
-
-    # Also scan configured game directories as a fallback
-    game_paths = load_game_paths()
-    for game in game_paths:
-        data_path = game.get("data_path", "")
-        if data_path:
-            game_folder = os.path.dirname(data_path)
-            if os.path.isdir(game_folder):
-                scan_roots.append(game_folder)
-
-    skip_dirs = {'node_modules', '__pycache__', '.git', '.cache', 'Trash',
-                 '.build_venv', '.venv', 'venv'}
-
-    for scan_root in scan_roots:
-        for root, dirs, files in os.walk(scan_root):
-            # Skip irrelevant directories to keep scanning fast
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
-
-            for filename in files:
-                if filename.lower() == "modorganizer.exe":
-                    mo2_folder = root
-                    if mo2_folder in seen_paths:
-                        continue
-                    seen_paths.add(mo2_folder)
-                    # Create a friendly display name using the parent folder name
-                    parent_name = os.path.basename(mo2_folder)
-                    grandparent = os.path.basename(os.path.dirname(mo2_folder))
-                    display_name = f"{grandparent}/{parent_name}" if grandparent else parent_name
-                    instances.append((display_name, mo2_folder))
-
-    # Sort by path for consistent ordering
-    instances.sort(key=lambda x: x[1])
-    return instances
-
-
-class DownloadWorker(QThread):
-    """Worker thread to download and extract MO2 without blocking the GUI."""
-    output_signal = pyqtSignal(str)
-    progress_signal = pyqtSignal(int)  # Download progress percentage
-    finished_signal = pyqtSignal(bool, str)
-
-    MO2_DOWNLOAD_URL = "https://github.com/ModOrganizer2/modorganizer/releases/download/v2.5.2/Mod.Organizer-2.5.2.7z"
-
-    def __init__(self, destination_folder, game_data=None):
-        super().__init__()
-        self.destination_folder = destination_folder
-        self.game_data = game_data
-
-    def run(self):
-        try:
-            # Create destination folder
-            os.makedirs(self.destination_folder, exist_ok=True)
-            self.output_signal.emit(f"Destination: {self.destination_folder}")
-
-            # Download to temp file
-            self.output_signal.emit(f"Downloading Mod Organizer 2...")
-            self.output_signal.emit(f"URL: {self.MO2_DOWNLOAD_URL}")
-
-            # Create temp file for download
-            temp_file = os.path.join(tempfile.gettempdir(), "Mod.Organizer-2.5.2.7z")
-
-            # Download with progress using SSL context (required for AppImage)
-            ssl_context = ssl.create_default_context(cafile=certifi.where())
-            request = urllib.request.Request(self.MO2_DOWNLOAD_URL)
-
-            with urllib.request.urlopen(request, context=ssl_context) as response:
-                total_size = int(response.headers.get('Content-Length', 0))
-                block_size = 8192
-                downloaded = 0
-
-                with open(temp_file, 'wb') as f:
-                    while True:
-                        block = response.read(block_size)
-                        if not block:
-                            break
-                        f.write(block)
-                        downloaded += len(block)
-                        if total_size > 0:
-                            progress = int(downloaded * 100 / total_size)
-                            self.progress_signal.emit(min(progress, 100))
-
-            self.output_signal.emit("Download complete!")
-
-            # Extract using py7zr (preferred in AppImage) or system 7z
-            self.output_signal.emit("Extracting archive...")
-            self.progress_signal.emit(0)  # Reset progress for extraction
-
-            # Prefer py7zr to avoid glibc/library conflicts in AppImage
-            try:
-                import py7zr
-                self.output_signal.emit("Using py7zr for extraction...")
-                with py7zr.SevenZipFile(temp_file, mode='r') as archive:
-                    archive.extractall(path=self.destination_folder)
-                self.output_signal.emit("Extraction complete!")
-            except ImportError:
-                # Fall back to system 7z with clean environment
-                extract_cmd = None
-                for cmd in ["7z", "7za", "7zr"]:
-                    if shutil.which(cmd):
-                        extract_cmd = cmd
-                        break
-
-                if not extract_cmd:
-                    raise Exception("No 7z extraction tool found. Please install p7zip: sudo pacman -S p7zip")
-
-                self.output_signal.emit(f"Using {extract_cmd} for extraction...")
-                # Use clean environment to avoid AppImage library conflicts
-                result = subprocess.run(
-                    [extract_cmd, "x", "-y", f"-o{self.destination_folder}", temp_file],
-                    capture_output=True,
-                    text=True,
-                    env=get_clean_env()
-                )
-                if result.returncode != 0:
-                    raise Exception(f"Extraction failed: {result.stderr}")
-                self.output_signal.emit("Extraction complete!")
-
-            # Clean up temp file
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-                self.output_signal.emit("Cleaned up temporary files.")
-
-            # Verify ModOrganizer.exe exists
-            mo2_exe = os.path.join(self.destination_folder, "ModOrganizer.exe")
-            if not os.path.isfile(mo2_exe):
-                raise Exception(f"ModOrganizer.exe not found in extracted files")
-
-            self.output_signal.emit(f"ModOrganizer.exe found at: {mo2_exe}")
-
-            # Create ModOrganizer.ini if game_data is provided
-            if self.game_data:
-                self.output_signal.emit("Creating ModOrganizer.ini...")
-                self.create_mo2_ini()
-
-            # Install vcredist into the game's prefix
-            if self.game_data:
-                self.install_vcredist()
-
-            self.finished_signal.emit(True, self.destination_folder)
-
-        except Exception as e:
-            self.output_signal.emit(f"ERROR: {str(e)}")
-            self.finished_signal.emit(False, str(e))
-
-    def create_mo2_ini(self):
-        """Create the ModOrganizer.ini configuration file."""
-        game_name = self.game_data.get("name", "")
-        is_goty = game_name == "Fallout 3 GOTY"
-        # MO2 doesn't recognize "GOTY" variants; use the base game name
-        if is_goty:
-            game_name = "Fallout 3"
-        data_path = self.game_data.get("data_path", "")
-
-        # Get game folder (parent of Data folder)
-        game_folder = os.path.dirname(data_path) if data_path else ""
-
-        # Convert Linux path to Wine Z: drive path
-        # /home/deck/... -> Z:\\home\\deck\\...
-        wine_game_path = "Z:" + game_folder.replace("/", "\\\\") if game_folder else ""
-
-        ini_content = f"""[General]
-gameName={game_name}
-gamePath=@ByteArray({wine_game_path})
-selected_profile=@ByteArray(Default)
-version=2.5.2
-first_start=false
-{"game_edition=Game Of The Year\n" if is_goty else "game_edition=Regular\n" if game_name == "Fallout 3" else ""}
-[Settings]
-profile_local_inis=false
-profile_local_saves=false
-style=1809 Dark Mode.qss
-"""
-
-        ini_path = os.path.join(self.destination_folder, "ModOrganizer.ini")
-        with open(ini_path, 'w', encoding='utf-8') as f:
-            f.write(ini_content)
-
-        self.output_signal.emit(f"Created ModOrganizer.ini for {game_name}")
-        self.output_signal.emit(f"Game path: {wine_game_path}")
-
-    def install_vcredist(self):
-        """Download and install Visual C++ Redistributable into the game's Wine prefix."""
-        plugins_path = self.game_data.get("plugins_path", "")
-        if not plugins_path:
-            self.output_signal.emit("Skipping vcredist: no plugins path configured.")
-            return
-
-        pfx_index = plugins_path.find("/pfx/")
-        if pfx_index == -1:
-            self.output_signal.emit("Skipping vcredist: could not determine Wine prefix.")
-            return
-
-        compat_data_path = plugins_path[:pfx_index]
-        if not os.path.isdir(compat_data_path):
-            self.output_signal.emit(f"Skipping vcredist: compatdata folder not found: {compat_data_path}")
-            return
-
-        # Detect Proton version from config_info
-        config_info_path = os.path.join(compat_data_path, "config_info")
-        proton_path = None
-
-        if os.path.isfile(config_info_path):
-            try:
-                with open(config_info_path, 'r') as f:
-                    lines = f.readlines()
-                if len(lines) >= 2:
-                    font_path = lines[1].strip()
-                    files_index = font_path.find("/files/")
-                    if files_index != -1:
-                        proton_dir = font_path[:files_index]
-                        candidate = os.path.join(proton_dir, "proton")
-                        if os.path.isfile(candidate):
-                            proton_path = candidate
-            except Exception:
-                pass
-
-        if not proton_path:
-            self.output_signal.emit("Skipping vcredist: could not detect Proton version. Make sure the game has been launched at least once via Steam.")
-            return
-
-        proton_name = os.path.basename(os.path.dirname(proton_path))
-
-        # Download vcredist
-        vcredist_url = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
-        vcredist_file = os.path.join(tempfile.gettempdir(), "vc_redist.x64.exe")
-
-        self.output_signal.emit(f"Downloading Visual C++ Redistributable...")
-        try:
-            ssl_context = ssl.create_default_context(cafile=certifi.where())
-            request = urllib.request.Request(vcredist_url)
-            with urllib.request.urlopen(request, context=ssl_context) as response:
-                with open(vcredist_file, 'wb') as f:
-                    f.write(response.read())
-            self.output_signal.emit("Download complete!")
-        except Exception as e:
-            self.output_signal.emit(f"Failed to download vcredist: {e}")
-            return
-
-        # Install vcredist silently into the game's prefix
-        self.output_signal.emit(f"Installing vcredist into prefix via {proton_name}...")
-        env = get_clean_env()
-        env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = os.path.expanduser("~/.local/share/Steam")
-        env["STEAM_COMPAT_DATA_PATH"] = compat_data_path
-
-        try:
-            result = subprocess.run(
-                [proton_path, "run", vcredist_file, "/install", "/quiet", "/norestart"],
-                env=env,
-                cwd=tempfile.gettempdir(),
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
-            self.output_signal.emit("vcredist installation complete!")
-        except subprocess.TimeoutExpired:
-            self.output_signal.emit("vcredist installation timed out (this may be OK - it might still be installing in the background).")
-        except Exception as e:
-            self.output_signal.emit(f"vcredist installation failed: {e}")
-        finally:
-            # Clean up
-            if os.path.exists(vcredist_file):
-                os.remove(vcredist_file)
-
-
-class BuildWorker(QThread):
-    """Worker thread to run the build process without blocking the GUI."""
-    output_signal = pyqtSignal(str)
-    finished_signal = pyqtSignal(bool, str)
-
-    def __init__(self, modlist, mods_folder, output_dir, overwrite_folder=None, plugins_dest=None, game_data=None):
-        super().__init__()
-        self.modlist = modlist
-        self.mods_folder = mods_folder
-        self.output_dir = output_dir
-        self.overwrite_folder = overwrite_folder
-        self.plugins_dest = plugins_dest
-        self.game_data = game_data
-
-    def run(self):
-        import io
-        import contextlib
-
-        # Capture stdout to emit as signals
-        class OutputCapture(io.StringIO):
-            def __init__(self, signal):
-                super().__init__()
-                self.signal = signal
-                self.line_buffer = ""
-
-            def write(self, text):
-                self.line_buffer += text
-                while '\n' in self.line_buffer:
-                    line, self.line_buffer = self.line_buffer.split('\n', 1)
-                    if line:
-                        self.signal.emit(line)
-                return len(text)
-
-            def flush(self):
-                if self.line_buffer:
-                    self.signal.emit(self.line_buffer)
-                    self.line_buffer = ""
-
-        try:
-            # Import build_data_folder module
-            import build_data_folder
-
-            # Capture output
-            output_capture = OutputCapture(self.output_signal)
-
-            with contextlib.redirect_stdout(output_capture):
-                # Run the build process
-                build_data_folder.build_data_folder(
-                    self.modlist,
-                    self.mods_folder,
-                    self.output_dir,
-                    self.overwrite_folder
-                )
-
-                # Handle ShaderCache if overwrite folder exists
-                if self.overwrite_folder:
-                    print()
-                    print("=" * 70)
-                    print("SHADERCACHE COPY")
-                    print("=" * 70)
-                    if build_data_folder.copy_shadercache_to_data(self.overwrite_folder, self.output_dir):
-                        print("ShaderCache copied successfully!")
-                    else:
-                        print("No ShaderCache to copy")
-                    print("=" * 70)
-
-                # Handle plugins.txt symlinking
-                if self.plugins_dest:
-                    modlist_dir = os.path.dirname(self.modlist)
-                    plugins_source = os.path.join(modlist_dir, 'plugins.txt')
-
-                    if os.path.exists(plugins_source):
-                        print()
-                        print("=" * 70)
-                        print("PLUGINS.TXT SYMLINK")
-                        print("=" * 70)
-                        print(f"Source:      {plugins_source}")
-                        print(f"Destination: {os.path.join(self.plugins_dest, 'plugins.txt')}")
-
-                        # Create destination directory if needed
-                        if not os.path.exists(self.plugins_dest):
-                            os.makedirs(self.plugins_dest)
-
-                        plugins_dest_file = os.path.join(self.plugins_dest, 'plugins.txt')
-
-                        # Remove existing plugins.txt
-                        if os.path.exists(plugins_dest_file) or os.path.islink(plugins_dest_file):
-                            os.remove(plugins_dest_file)
-
-                        # Create symlink
-                        os.symlink(plugins_source, plugins_dest_file)
-                        print("Symlink created successfully!")
-                        print("=" * 70)
-
-                # Handle script extender launcher swap
-                if self.game_data:
-                    launcher_name = self.game_data.get("launcher_name")
-                    script_extender_name = self.game_data.get("script_extender_name")
-
-                    if launcher_name and script_extender_name:
-                        # Get the game folder (parent of Data folder)
-                        game_folder = os.path.dirname(self.output_dir)
-                        launcher_path = os.path.join(game_folder, launcher_name)
-                        script_extender_path = os.path.join(game_folder, script_extender_name)
-                        backup_path = os.path.join(game_folder, launcher_name.replace(".exe", ".bak"))
-
-                        if os.path.exists(script_extender_path):
-                            print()
-                            print("=" * 70)
-                            print("SCRIPT EXTENDER LAUNCHER SWAP")
-                            print("=" * 70)
-                            print(f"Game folder: {game_folder}")
-                            print(f"Launcher: {launcher_name}")
-                            print(f"Script Extender: {script_extender_name}")
-
-                            # Backup the original launcher if it exists and backup doesn't
-                            if os.path.exists(launcher_path) and not os.path.exists(backup_path):
-                                print(f"Backing up {launcher_name} -> {launcher_name.replace('.exe', '.bak')}")
-                                shutil.copy2(launcher_path, backup_path)
-                            elif os.path.exists(backup_path):
-                                print(f"Backup already exists: {launcher_name.replace('.exe', '.bak')}")
-
-                            # Copy script extender to launcher name (overwrite)
-                            print(f"Copying {script_extender_name} -> {launcher_name}")
-                            shutil.copy2(script_extender_path, launcher_path)
-                            print("Script extender launcher swap completed!")
-                            print("=" * 70)
-                        else:
-                            print()
-                            print("=" * 70)
-                            print("SCRIPT EXTENDER LAUNCHER SWAP - SKIPPED")
-                            print("=" * 70)
-                            print(f"Script extender not found: {script_extender_path}")
-                            print("=" * 70)
-
-            output_capture.flush()
-            self.finished_signal.emit(True, "Build completed successfully!")
-
-        except Exception as e:
-            import traceback
-            self.output_signal.emit(f"ERROR: {str(e)}")
-            self.output_signal.emit(traceback.format_exc())
-            self.finished_signal.emit(False, f"Build failed: {str(e)}")
+import utils
+import build_json
 
 
 class ModlistPanel(QFrame):
@@ -1259,7 +578,7 @@ class MO2MergerGUI(QMainWindow):
         mo2_layout = QVBoxLayout()
 
         # Scan for MO2 instances
-        self.mo2_instances = scan_for_mo2_instances()
+        self.mo2_instances = utils.scan_for_mo2_instances()
 
         # MO2 instance selector
         mo2_select_layout = QHBoxLayout()
@@ -1389,7 +708,7 @@ class MO2MergerGUI(QMainWindow):
         output_layout = QVBoxLayout()
 
         # Game selection dropdown
-        self.game_paths = load_game_paths()
+        self.game_paths = utils.load_game_paths()
         game_select_layout = QHBoxLayout()
         game_select_layout.addWidget(QLabel("Game:"))
         self.game_combo = QComboBox()
@@ -1463,7 +782,7 @@ class MO2MergerGUI(QMainWindow):
         # Set initial state - show paths from first game if available
         if self.game_paths:
             self.data_output_edit.setText(self.game_paths[0].get("data_path", ""))
-            self.plugins_output_edit.setText(get_prefix_from_plugins_path(self.game_paths[0].get("plugins_path", "")))
+            self.plugins_output_edit.setText(utils.get_prefix_from_plugins_path(self.game_paths[0].get("plugins_path", "")))
             self.downgrade_btn.setVisible(self.game_paths[0].get("name") in ("Fallout 3", "Fallout 3 GOTY"))
 
         output_group.setLayout(output_layout)
@@ -1560,7 +879,7 @@ class MO2MergerGUI(QMainWindow):
         current_path = self.mo2_combo.currentData()
 
         # Rescan
-        self.mo2_instances = scan_for_mo2_instances()
+        self.mo2_instances = utils.scan_for_mo2_instances()
 
         # Update combo box
         self.mo2_combo.blockSignals(True)
@@ -1619,60 +938,18 @@ class MO2MergerGUI(QMainWindow):
             QMessageBox.warning(self, "Error", f"ModOrganizer.exe not found at:\n{mo2_exe}")
             return
 
-        # Detect proton and prefix from the game's compatdata
-        plugins_path = game_data.get("plugins_path", "")
-        if not plugins_path:
-            QMessageBox.warning(self, "Error", "No plugins path configured for this game.")
+        try:
+            proton_path, compat_data_path = utils.detect_proton_path(game_data.get("plugins_path", ""))
+        except ValueError as e:
+            QMessageBox.warning(self, "Error", str(e))
             return
 
-        pfx_index = plugins_path.find("/pfx/")
-        if pfx_index == -1:
-            QMessageBox.warning(self, "Error", "Could not determine Wine prefix from plugins path.")
-            return
-
-        compat_data_path = plugins_path[:pfx_index]
-
-        if not os.path.isdir(compat_data_path):
-            QMessageBox.warning(self, "Error", f"Compatdata folder not found:\n{compat_data_path}")
-            return
-
-        # Detect which Proton version was used by reading config_info
-        config_info_path = os.path.join(compat_data_path, "config_info")
-        proton_path = None
-
-        if os.path.isfile(config_info_path):
-            try:
-                with open(config_info_path, 'r') as f:
-                    lines = f.readlines()
-                if len(lines) >= 2:
-                    font_path = lines[1].strip()
-                    files_index = font_path.find("/files/")
-                    if files_index != -1:
-                        proton_dir = font_path[:files_index]
-                        candidate = os.path.join(proton_dir, "proton")
-                        if os.path.isfile(candidate):
-                            proton_path = candidate
-            except Exception:
-                pass
-
-        if not proton_path:
-            QMessageBox.warning(
-                self, "Error",
-                f"Could not detect Proton version for {game_data['name']}.\n\n"
-                f"The config_info file was not found or could not be parsed at:\n"
-                f"{config_info_path}\n\n"
-                "Make sure the game has been launched at least once via Steam."
-            )
-            return
-
-        # Set up environment (clean AppImage paths to avoid conflicts with Proton)
-        env = get_clean_env()
+        env = utils.get_clean_env()
         env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = os.path.expanduser("~/.local/share/Steam")
         env["STEAM_COMPAT_DATA_PATH"] = compat_data_path
 
         proton_name = os.path.basename(os.path.dirname(proton_path))
 
-        # Launch MO2 via Proton (non-blocking)
         try:
             subprocess.Popen([proton_path, "run", mo2_exe], env=env, cwd=self.mo2_path)
             self.append_log(f"Launched ModOrganizer.exe via {proton_name}")
@@ -1695,7 +972,7 @@ class MO2MergerGUI(QMainWindow):
             )
             return
 
-        subprocess.Popen(["xdg-open", url], env=get_clean_env())
+        subprocess.Popen(["xdg-open", url], env=utils.get_clean_env())
 
     def install_script_extender(self):
         """Install a script extender from a user-selected zip file to the game's root directory."""
@@ -1760,7 +1037,7 @@ class MO2MergerGUI(QMainWindow):
                             raise Exception("No 7z extraction tool found. Please install p7zip: sudo pacman -S p7zip")
                         result = subprocess.run(
                             [extract_cmd, "x", "-y", f"-o{temp_dir}", archive_path],
-                            capture_output=True, text=True, env=get_clean_env()
+                            capture_output=True, text=True, env=utils.get_clean_env()
                         )
                         if result.returncode != 0:
                             raise Exception(f"Extraction failed: {result.stderr}")
@@ -1824,7 +1101,7 @@ class MO2MergerGUI(QMainWindow):
                         installed_files.append(dst_file)
 
                 # Save manifest of installed files
-                manifest_path = self.get_se_manifest_path(game_data)
+                manifest_path = utils.get_se_manifest_path(game_data)
                 if manifest_path:
                     os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
                     with open(manifest_path, 'w', encoding='utf-8') as f:
@@ -1850,16 +1127,6 @@ class MO2MergerGUI(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to install script extender:\n{str(e)}")
 
-    def get_se_manifest_path(self, game_data):
-        """Get the path to the script extender install manifest for a game."""
-        if not game_data:
-            return None
-        game_name = game_data.get("name", "").replace(" ", "_").lower()
-        if not game_name:
-            return None
-        config_dir = os.path.join(os.path.expanduser("~"), ".config", "mo2manager")
-        return os.path.join(config_dir, f"se_installed_{game_name}.json")
-
     def uninstall_script_extender(self):
         """Remove previously installed script extender files using the saved manifest."""
         game_data = self.game_combo.currentData()
@@ -1867,7 +1134,7 @@ class MO2MergerGUI(QMainWindow):
             QMessageBox.warning(self, "Error", "No game selected.")
             return
 
-        manifest_path = self.get_se_manifest_path(game_data)
+        manifest_path = utils.get_se_manifest_path(game_data)
         if not manifest_path or not os.path.isfile(manifest_path):
             QMessageBox.warning(self, "Error", "No script extender installation found for this game.")
             return
@@ -1977,19 +1244,6 @@ class MO2MergerGUI(QMainWindow):
         QMessageBox.information(self, "Uninstall Complete",
                                 f"Script extender uninstalled.\n\n{detail}")
 
-    def _update_game_data_path(self, game_name, game_folder):
-        """Update data_path in config to reflect where the game was actually found."""
-        new_data_path = os.path.join(game_folder, "Data")
-        for game in self.game_paths:
-            if game.get("name") == game_name:
-                game["data_path"] = new_data_path
-                break
-        save_game_paths(self.game_paths)
-        self.append_log(f"Updated data_path for {game_name}: {new_data_path}")
-
-        # Update the game combo's stored data and rebuild it to reflect changes
-        self._refresh_game_combo()
-
     def _update_game_data_path(self, game_name, new_data_path):
         """Update data_path in config for the given game."""
         for game in self.game_paths:
@@ -1998,7 +1252,7 @@ class MO2MergerGUI(QMainWindow):
                     return
                 game["data_path"] = new_data_path
                 break
-        save_game_paths(self.game_paths)
+        utils.ave_game_paths(self.game_paths)
         self.append_log(f"Updated data_path for {game_name}: {new_data_path}")
         self._refresh_game_combo()
 
@@ -2010,7 +1264,7 @@ class MO2MergerGUI(QMainWindow):
                     return
                 game["plugins_path"] = new_plugins_path
                 break
-        save_game_paths(self.game_paths)
+        utils.ave_game_paths(self.game_paths)
         self.append_log(f"Updated plugins_path for {game_name}: {new_plugins_path}")
         self._refresh_game_combo()
 
@@ -2035,7 +1289,7 @@ class MO2MergerGUI(QMainWindow):
         game_data = self.game_combo.currentData()
         if game_data:
             self.data_output_edit.setText(game_data.get("data_path", ""))
-            self.plugins_output_edit.setText(get_prefix_from_plugins_path(game_data.get("plugins_path", "")))
+            self.plugins_output_edit.setText(utils.get_prefix_from_plugins_path(game_data.get("plugins_path", "")))
 
     def _start_mo2_download(self, folder, selected_game_data):
         """Start the MO2 download/install worker for a given folder and game."""
@@ -2044,7 +1298,7 @@ class MO2MergerGUI(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.add_instance_btn.setEnabled(False)
 
-        self.download_worker = DownloadWorker(folder, selected_game_data)
+        self.download_worker = utils.DownloadWorker(folder, selected_game_data)
         self.download_worker.output_signal.connect(self.append_log)
         self.download_worker.progress_signal.connect(self.progress_bar.setValue)
         self.download_worker.finished_signal.connect(self.download_finished)
@@ -2058,7 +1312,7 @@ class MO2MergerGUI(QMainWindow):
 
         # Scan for installed games by launcher_name across all locations
         self.append_log("Scanning for installed games...")
-        installed_games = find_game_installs(self.game_paths)
+        installed_games = utils.find_game_installs(self.game_paths)
 
         # If both Fallout 3 and Fallout 3 GOTY were found (same launcher),
         # keep only Fallout 3 — the version dialog later handles the choice
@@ -2121,7 +1375,7 @@ class MO2MergerGUI(QMainWindow):
                 return
 
             self.append_log(f"Scanning {folder} for game launchers...")
-            found = _scan_for_launchers(self.game_paths, [folder])
+            found = utils._scan_for_launchers(self.game_paths, [folder])
 
             if not found:
                 QMessageBox.warning(
@@ -2296,7 +1550,7 @@ class MO2MergerGUI(QMainWindow):
         """Open the selected MO2 instance's game folder in the file manager."""
         if self.mo2_path and os.path.isdir(self.mo2_path):
             game_folder = os.path.dirname(self.mo2_path)
-            subprocess.Popen(["xdg-open", game_folder], env=get_clean_env())
+            subprocess.Popen(["xdg-open", game_folder], env=utils.get_clean_env())
 
     def download_finished(self, success, result):
         """Handle download completion."""
@@ -2461,7 +1715,7 @@ class MO2MergerGUI(QMainWindow):
                         self.game_combo.blockSignals(False)
                         # Update the output paths
                         self.data_output_edit.setText(game.get("data_path", ""))
-                        self.plugins_output_edit.setText(get_prefix_from_plugins_path(game.get("plugins_path", "")))
+                        self.plugins_output_edit.setText(utils.get_prefix_from_plugins_path(game.get("plugins_path", "")))
                         # Update downgrade button visibility
                         self.downgrade_btn.setVisible(game_name in ("Fallout 3", "Fallout 3 GOTY"))
                         self.update_build_button()
@@ -2484,7 +1738,7 @@ class MO2MergerGUI(QMainWindow):
         game_data = self.game_combo.currentData()
         if game_data:
             self.data_output_edit.setText(game_data.get("data_path", ""))
-            self.plugins_output_edit.setText(get_prefix_from_plugins_path(game_data.get("plugins_path", "")))
+            self.plugins_output_edit.setText(utils.get_prefix_from_plugins_path(game_data.get("plugins_path", "")))
 
         # Show Downgrade button only for Fallout 3
         is_fallout3 = game_data is not None and game_data.get("name") in ("Fallout 3", "Fallout 3 GOTY")
@@ -2499,57 +1753,13 @@ class MO2MergerGUI(QMainWindow):
             QMessageBox.warning(self, "Error", "No game selected. Please select a game first.")
             return
 
-        plugins_path = game_data.get("plugins_path", "")
-        if not plugins_path:
-            QMessageBox.warning(self, "Error", "No plugins path configured for this game.")
+        try:
+            proton_path, compat_data_path = utils.detect_proton_path(game_data.get("plugins_path", ""))
+        except ValueError as e:
+            QMessageBox.warning(self, "Error", str(e))
             return
 
-        # Extract compatdata path from plugins_path
-        # e.g. .../compatdata/489830/pfx/drive_c/... -> .../compatdata/489830
-        pfx_index = plugins_path.find("/pfx/")
-        if pfx_index == -1:
-            QMessageBox.warning(self, "Error", "Could not determine Wine prefix from plugins path.")
-            return
-
-        compat_data_path = plugins_path[:pfx_index]
-
-        if not os.path.isdir(compat_data_path):
-            QMessageBox.warning(self, "Error", f"Compatdata folder not found:\n{compat_data_path}")
-            return
-
-        # Detect which Proton version was used by reading config_info
-        config_info_path = os.path.join(compat_data_path, "config_info")
-        proton_path = None
-
-        if os.path.isfile(config_info_path):
-            try:
-                with open(config_info_path, 'r') as f:
-                    lines = f.readlines()
-                if len(lines) >= 2:
-                    # Line 2 contains a path like .../common/Proton 9.0 (Beta)/files/share/fonts/
-                    # Extract the Proton install dir (everything up to and including the dir before /files/)
-                    font_path = lines[1].strip()
-                    files_index = font_path.find("/files/")
-                    if files_index != -1:
-                        proton_dir = font_path[:files_index]
-                        candidate = os.path.join(proton_dir, "proton")
-                        if os.path.isfile(candidate):
-                            proton_path = candidate
-            except Exception:
-                pass
-
-        if not proton_path:
-            QMessageBox.warning(
-                self, "Error",
-                f"Could not detect Proton version for {game_data['name']}.\n\n"
-                f"The config_info file was not found or could not be parsed at:\n"
-                f"{config_info_path}\n\n"
-                "Make sure the game has been launched at least once via Steam."
-            )
-            return
-
-        # Set up environment for Proton
-        env = get_clean_env()
+        env = utils.get_clean_env()
         env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = os.path.expanduser("~/.local/share/Steam")
         env["STEAM_COMPAT_DATA_PATH"] = compat_data_path
 
@@ -2574,13 +1784,7 @@ class MO2MergerGUI(QMainWindow):
             return
 
         # Extract app ID from compatdata path
-        # e.g. .../compatdata/489830/pfx/drive_c/... -> 489830
-        pfx_index = plugins_path.find("/pfx/")
-        if pfx_index == -1:
-            QMessageBox.warning(self, "Error", "Could not determine Wine prefix from plugins path.")
-            return
-
-        compat_data_path = plugins_path[:pfx_index]
+        compat_data_path = utils.get_prefix_from_plugins_path(plugins_path)
         app_id = os.path.basename(compat_data_path)
 
         # Find protontricks (native or flatpak)
@@ -2610,7 +1814,7 @@ class MO2MergerGUI(QMainWindow):
             )
             return
 
-        env = get_clean_env()
+        env = utils.get_clean_env()
         # Suppress "Failed to load module canberra-gtk-module" warning
         gtk_modules = env.get("GTK_MODULES", "")
         if gtk_modules:
@@ -2670,50 +1874,10 @@ class MO2MergerGUI(QMainWindow):
             QMessageBox.warning(self, "Error", "No game selected. Please select a game first.")
             return
 
-        plugins_path = game_data.get("plugins_path", "")
-        if not plugins_path:
-            QMessageBox.warning(self, "Error", "No plugins path configured for this game.")
-            return
-
-        # Extract compatdata path from plugins_path
-        pfx_index = plugins_path.find("/pfx/")
-        if pfx_index == -1:
-            QMessageBox.warning(self, "Error", "Could not determine Wine prefix from plugins path.")
-            return
-
-        compat_data_path = plugins_path[:pfx_index]
-
-        if not os.path.isdir(compat_data_path):
-            QMessageBox.warning(self, "Error", f"Compatdata folder not found:\n{compat_data_path}")
-            return
-
-        # Detect which Proton version was used by reading config_info
-        config_info_path = os.path.join(compat_data_path, "config_info")
-        proton_path = None
-
-        if os.path.isfile(config_info_path):
-            try:
-                with open(config_info_path, 'r') as f:
-                    lines = f.readlines()
-                if len(lines) >= 2:
-                    font_path = lines[1].strip()
-                    files_index = font_path.find("/files/")
-                    if files_index != -1:
-                        proton_dir = font_path[:files_index]
-                        candidate = os.path.join(proton_dir, "proton")
-                        if os.path.isfile(candidate):
-                            proton_path = candidate
-            except Exception:
-                pass
-
-        if not proton_path:
-            QMessageBox.warning(
-                self, "Error",
-                f"Could not detect Proton version for {game_data['name']}.\n\n"
-                f"The config_info file was not found or could not be parsed at:\n"
-                f"{config_info_path}\n\n"
-                "Make sure the game has been launched at least once via Steam."
-            )
+        try:
+            proton_path, compat_data_path = utils.detect_proton_path(game_data.get("plugins_path", ""))
+        except ValueError as e:
+            QMessageBox.warning(self, "Error", str(e))
             return
 
         # Ask user to select an executable
@@ -2728,7 +1892,7 @@ class MO2MergerGUI(QMainWindow):
             return
 
         # Set up environment for Proton
-        env = get_clean_env()
+        env = utils.get_clean_env()
         env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = os.path.expanduser("~/.local/share/Steam")
         env["STEAM_COMPAT_DATA_PATH"] = compat_data_path
 
@@ -2780,7 +1944,7 @@ class MO2MergerGUI(QMainWindow):
                 return
 
             if clicked.text() == "Open Download Page":
-                subprocess.Popen(["xdg-open", "https://www.nexusmods.com/fallout3/mods/24913"], env=get_clean_env())
+                subprocess.Popen(["xdg-open", "https://www.nexusmods.com/fallout3/mods/24913"], env=utils.get_clean_env())
                 # After opening the page, ask again to select the zip
                 zip_path, _ = QFileDialog.getOpenFileName(
                     self,
@@ -2836,42 +2000,15 @@ class MO2MergerGUI(QMainWindow):
                 QMessageBox.warning(self, "Error", "Patcher.exe still not found after extraction.")
                 return
 
-        # Detect Proton version from config_info
-        plugins_path = game_data.get("plugins_path", "")
-        pfx_index = plugins_path.find("/pfx/")
-        if pfx_index == -1:
-            QMessageBox.warning(self, "Error", "Could not determine Wine prefix from plugins path.")
-            return
-
-        compat_data_path = plugins_path[:pfx_index]
-        config_info_path = os.path.join(compat_data_path, "config_info")
-        proton_path = None
-
-        if os.path.isfile(config_info_path):
-            try:
-                with open(config_info_path, 'r') as f:
-                    lines = f.readlines()
-                if len(lines) >= 2:
-                    font_path = lines[1].strip()
-                    files_index = font_path.find("/files/")
-                    if files_index != -1:
-                        proton_dir = font_path[:files_index]
-                        candidate = os.path.join(proton_dir, "proton")
-                        if os.path.isfile(candidate):
-                            proton_path = candidate
-            except Exception:
-                pass
-
-        if not proton_path:
-            QMessageBox.warning(
-                self, "Error",
-                "Could not detect Proton version for Fallout 3.\n\n"
-                "Make sure the game has been launched at least once via Steam."
-            )
+        # Detect Proton version
+        try:
+            proton_path, compat_data_path = utils.detect_proton_path(game_data.get("plugins_path", ""))
+        except ValueError as e:
+            QMessageBox.warning(self, "Error", str(e))
             return
 
         # Run Patcher.exe via Proton
-        env = get_clean_env()
+        env = utils.get_clean_env()
         env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = os.path.expanduser("~/.local/share/Steam")
         env["STEAM_COMPAT_DATA_PATH"] = compat_data_path
 
@@ -2903,7 +2040,7 @@ class MO2MergerGUI(QMainWindow):
         game_name = game_data.get("name", "")
 
         # Get the expected suffix from the default config (e.g. "Fallout 4/Data")
-        defaults = get_default_game_paths()
+        defaults = build_json.get_default_game_paths()
         default_path = ""
         expected_suffix = ""
         for g in defaults["games"]:
@@ -2931,8 +2068,8 @@ class MO2MergerGUI(QMainWindow):
             self.se_download_btn.setEnabled(has_se_download)
             has_se_name = bool(game_data and game_data.get("script_extender_name"))
             self.se_install_btn.setEnabled(has_se_name)
-            has_manifest = bool(game_data and self.get_se_manifest_path(game_data) and
-                                os.path.isfile(self.get_se_manifest_path(game_data)))
+            has_manifest = bool(game_data and utils.get_se_manifest_path(game_data) and
+                                os.path.isfile(utils.get_se_manifest_path(game_data)))
             self.se_uninstall_btn.setEnabled(has_manifest)
 
             # Update script extender status label
@@ -3056,7 +2193,7 @@ class MO2MergerGUI(QMainWindow):
         # Get current game data for script extender swap
         game_data = self.game_combo.currentData()
 
-        self.worker = BuildWorker(
+        self.worker = utils.BuildWorker(
             modlist=modlist_path,
             mods_folder=self.mods_folder,
             output_dir=data_output,
