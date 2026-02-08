@@ -387,3 +387,4 @@ MO2Manager.AppDir/usr/bin/_internal/setuptools/_vendor/importlib_metadata-8.7.1.
 MO2Manager.AppDir/usr/bin/_internal/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/licenses/LICENSE
 MO2Manager.AppDir/usr/bin/_internal/setuptools/_vendor/jaraco/text/Lorem ipsum.txt
 MO2Manager.AppDir/usr/share/applications/mo2manager.desktop
+__pycache__/build_data_folder.cpython-313.pyc

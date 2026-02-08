@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """
-GUI for Skyrim Mod Organizer 2 Data Folder Builder
-
 A Linux GUI application that helps merge MO2 mods into a single Data folder
 using hardlinks.
 """
@@ -1251,6 +1249,12 @@ class MO2MergerGUI(QMainWindow):
         rescan_btn.clicked.connect(self.rescan_mo2_instances)
         mo2_select_layout.addWidget(rescan_btn)
 
+        # Refresh button
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setToolTip("Refresh mod lists, plugin lists, and folder status")
+        refresh_btn.clicked.connect(self.refresh_gui)
+        mo2_select_layout.addWidget(refresh_btn)
+
         mo2_layout.addLayout(mo2_select_layout)
 
         # Full path label (shows the complete path of selected instance)
@@ -1608,6 +1612,11 @@ class MO2MergerGUI(QMainWindow):
                 "No Mod Organizer 2 installations found.\n"
                 "Please enter the path manually."
             )
+
+    def refresh_gui(self):
+        """Refresh the GUI: re-validate MO2 folder, reload mod list and plugin list."""
+        self.validate_mo2_folder()
+        self.append_log("GUI refreshed.")
 
     def browse_mo2_folder(self):
         folder = QFileDialog.getExistingDirectory(

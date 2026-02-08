@@ -8,7 +8,7 @@ GUI_FILE="$PROJECT_DIR/gui.py"
 PYTHON_BIN="python3"
 # ----------------------------------------
 
-echo "== Skyrim Merger GUI Launcher =="
+echo "== MO2 Manager GUI Launcher =="
 
 # 1. Ensure python exists
 if ! command -v python3 >/dev/null 2>&1; then
