@@ -4,7 +4,7 @@ set -e
 # ---------------- CONFIG ----------------
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
-GUI_FILE="$PROJECT_DIR/gui.py"
+GUI_FILE="$PROJECT_DIR/src/gui.py"
 PYTHON_BIN="python3"
 # ----------------------------------------
 

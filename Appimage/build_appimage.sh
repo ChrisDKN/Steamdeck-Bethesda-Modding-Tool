@@ -39,6 +39,8 @@ source "$VENV_DIR/bin/activate"
 echo "Installing dependencies..."
 pip install --quiet pyinstaller PyQt6 certifi py7zr
 
+SRC_DIR="${SCRIPT_DIR}/../src"
+
 # Run PyInstaller
 echo "Running PyInstaller..."
 python3 -m PyInstaller \
@@ -46,8 +48,8 @@ python3 -m PyInstaller \
     --onedir \
     --windowed \
     --noconfirm \
-    --add-data "build_data_folder.py:." \
-    gui.py
+    --add-data "${SRC_DIR}/build_data_folder.py:." \
+    "${SRC_DIR}/gui.py"
 
 # Create AppDir structure
 echo "Creating AppDir structure..."
