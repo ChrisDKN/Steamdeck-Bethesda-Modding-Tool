@@ -1464,7 +1464,7 @@ class MO2MergerGUI(QMainWindow):
         if self.game_paths:
             self.data_output_edit.setText(self.game_paths[0].get("data_path", ""))
             self.plugins_output_edit.setText(get_prefix_from_plugins_path(self.game_paths[0].get("plugins_path", "")))
-            self.downgrade_btn.setVisible(self.game_paths[0].get("name") == "Fallout 3")
+            self.downgrade_btn.setVisible(self.game_paths[0].get("name") in ("Fallout 3", "Fallout 3 GOTY"))
 
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
@@ -2463,7 +2463,7 @@ class MO2MergerGUI(QMainWindow):
                         self.data_output_edit.setText(game.get("data_path", ""))
                         self.plugins_output_edit.setText(get_prefix_from_plugins_path(game.get("plugins_path", "")))
                         # Update downgrade button visibility
-                        self.downgrade_btn.setVisible(game_name == "Fallout 3")
+                        self.downgrade_btn.setVisible(game_name in ("Fallout 3", "Fallout 3 GOTY"))
                         self.update_build_button()
                         return
                 return
@@ -2487,7 +2487,7 @@ class MO2MergerGUI(QMainWindow):
             self.plugins_output_edit.setText(get_prefix_from_plugins_path(game_data.get("plugins_path", "")))
 
         # Show Downgrade button only for Fallout 3
-        is_fallout3 = game_data is not None and game_data.get("name") == "Fallout 3"
+        is_fallout3 = game_data is not None and game_data.get("name") in ("Fallout 3", "Fallout 3 GOTY")
         self.downgrade_btn.setVisible(is_fallout3)
 
         self.update_build_button()
@@ -2749,7 +2749,7 @@ class MO2MergerGUI(QMainWindow):
     def run_downgrade(self):
         """Downgrade Fallout 3 using the Updated Unofficial Fallout 3 Patch patcher."""
         game_data = self.game_combo.currentData()
-        if game_data is None or game_data.get("name") != "Fallout 3":
+        if game_data is None or game_data.get("name") not in ("Fallout 3", "Fallout 3 GOTY"):
             return
 
         data_path = game_data.get("data_path", "")
