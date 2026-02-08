@@ -664,3 +664,17 @@ class BuildWorker(QThread):
             self.output_signal.emit(f"ERROR: {str(e)}")
             self.output_signal.emit(traceback.format_exc())
             self.finished_signal.emit(False, f"Build failed: {str(e)}")
+
+def get_steam_id(game):
+    steam_id = {
+        "Skyrim Special Edition" : "489830",
+        "Skyrim" :                 "72850",
+        "Fallout 4" :              "377160",
+        "Fallout 3" :              "22300",
+        "Fallout 3 GOTY" :         "22370",
+        "New Vegas" :              "22380",
+        "Oblivion" :               "22330",
+        "Oblivion Remastered" :    "2623190",
+        "Morrowind" :              "22320"
+    }
+    return steam_id[game]
