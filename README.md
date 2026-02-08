@@ -30,7 +30,7 @@ This tool allows you to easily set up and run **Mod Organiser 2** to manage your
 
 ## Usage
 
-1. **Download the AppImage** from releases. Make sure it is executable by right-clicking > *Properties* > *Permissions* > tick *Allow executing file as program*.
+1. **Download the AppImage** from releases. Make sure it is executable by right-clicking > *Properties* > *Permissions* > tick *Allow executing file as program*. Alternatively you can download the repo and use run_gui.sh
 
 2. **Install the game** and run it once before proceeding to allow it to generate the files it needs. You can exit at the title screen.
 
@@ -61,7 +61,7 @@ This tool allows you to easily set up and run **Mod Organiser 2** to manage your
 
 ## When You Add/Remove/Change a Mod
 
-Whenever you make a change within Mod Organiser, you need to click **Build Data Folder** again.
+Whenever you make a change within Mod Organiser, you need to click **Build Data Folder** again to see any changes in game.
 
 ---
 
@@ -73,7 +73,7 @@ Some mods may require Wine DLL overrides to function (rare but possible). Instea
 2. Go to the **Libraries** tab.
 3. Add an override and set it to native/builtin/both (most DLL overrides use *both*).
 
-This removes the need for a Steam launch argument — the game will launch with the DLL override applied.
+This removes the need for a Steam launch argument — the game will launch with the DLL override applied. You can still use the steam launch argument if you prefer.
 
 ---
 
@@ -96,7 +96,7 @@ Fallout 3 must be downgraded to use the latest version of script extender.
 
 ## Custom Locations
 
-If the game is not in the default Steam common folder or on an SD card:
+If the game is not in the default Steam common folder or on an SD card or if you are not using SteamOS:
 
 1. **Add an instance** and select *Custom Location*.
 2. Find and select the game folder — the app should auto-detect what game it is.
