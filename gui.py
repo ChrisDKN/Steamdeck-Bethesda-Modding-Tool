@@ -125,6 +125,15 @@ def get_default_game_paths():
             "script_extender_download": "https://fose.silverlock.org/"
         },
         {
+            "name": "Fallout 3 GOTY",
+            "data_path": os.path.join(steam_common, "Fallout 3 goty/Data"),
+            "plugins_path": os.path.join(steam_compat, "22370/pfx/drive_c/users/steamuser/AppData/Local/Fallout3"),
+            "default_plugins_path": os.path.join(steam_compat, "22370/pfx/drive_c/users/steamuser/AppData/Local/Fallout3"),
+            "launcher_name": "Fallout3Launcher.exe",
+            "script_extender_name": "fose_loader.exe",
+            "script_extender_download": "https://fose.silverlock.org/"
+        },
+        {
             "name": "New Vegas",
             "data_path": os.path.join(steam_common, "Fallout New Vegas/Data"),
             "plugins_path": os.path.join(steam_compat, "22380/pfx/drive_c/users/steamuser/AppData/Local/FalloutNV"),
@@ -436,6 +445,10 @@ class DownloadWorker(QThread):
     def create_mo2_ini(self):
         """Create the ModOrganizer.ini configuration file."""
         game_name = self.game_data.get("name", "")
+        is_goty = game_name == "Fallout 3 GOTY"
+        # MO2 doesn't recognize "GOTY" variants; use the base game name
+        if is_goty:
+            game_name = "Fallout 3"
         data_path = self.game_data.get("data_path", "")
 
         # Get game folder (parent of Data folder)
@@ -451,7 +464,7 @@ gamePath=@ByteArray({wine_game_path})
 selected_profile=@ByteArray(Default)
 version=2.5.2
 first_start=false
-
+{"game_edition=Game Of The Year\n" if is_goty else "game_edition=Regular\n" if game_name == "Fallout 3" else ""}
 [Settings]
 profile_local_inis=false
 profile_local_saves=false
@@ -1451,7 +1464,7 @@ class MO2MergerGUI(QMainWindow):
         if self.game_paths:
             self.data_output_edit.setText(self.game_paths[0].get("data_path", ""))
             self.plugins_output_edit.setText(get_prefix_from_plugins_path(self.game_paths[0].get("plugins_path", "")))
-            self.downgrade_btn.setVisible(self.game_paths[0].get("name") == "Fallout 3")
+            self.downgrade_btn.setVisible(self.game_paths[0].get("name") in ("Fallout 3", "Fallout 3 GOTY"))
 
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
@@ -2047,6 +2060,11 @@ class MO2MergerGUI(QMainWindow):
         self.append_log("Scanning for installed games...")
         installed_games = find_game_installs(self.game_paths)
 
+        # If both Fallout 3 and Fallout 3 GOTY were found (same launcher),
+        # keep only Fallout 3 — the version dialog later handles the choice
+        if "Fallout 3" in installed_games and "Fallout 3 GOTY" in installed_games:
+            del installed_games["Fallout 3 GOTY"]
+
         # Build list of available games with their detected folders
         available_games = []
         game_folder_map = {}  # game name -> detected game folder
@@ -2114,6 +2132,11 @@ class MO2MergerGUI(QMainWindow):
                     "(the folder containing the game's launcher .exe)."
                 )
                 return
+
+            # If both Fallout 3 and Fallout 3 GOTY were found (same launcher),
+            # keep only Fallout 3 — the version dialog later handles the choice
+            if "Fallout 3" in found and "Fallout 3 GOTY" in found:
+                del found["Fallout 3 GOTY"]
 
             if len(found) == 1:
                 name, gfolder = next(iter(found.items()))
@@ -2193,6 +2216,30 @@ class MO2MergerGUI(QMainWindow):
         else:
             selected_game = combo.currentText()
             game_folder = game_folder_map[selected_game]
+
+        # If Fallout 3 is selected, ask which version the user has
+        if selected_game == "Fallout 3":
+            version_dialog = QMessageBox(self)
+            version_dialog.setWindowTitle("Fallout 3 Version")
+            version_dialog.setText(
+                "Which version of Fallout 3 do you have?\n\n"
+                "The GOTY edition uses a different Steam ID (22370)\n"
+                "and requires a different wine prefix."
+            )
+            normal_btn = version_dialog.addButton("Standard (22300)", QMessageBox.ButtonRole.AcceptRole)
+            goty_btn = version_dialog.addButton("GOTY (22370)", QMessageBox.ButtonRole.AcceptRole)
+            version_dialog.addButton(QMessageBox.StandardButton.Cancel)
+            version_dialog.exec()
+
+            clicked = version_dialog.clickedButton()
+            if clicked == goty_btn:
+                selected_game = "Fallout 3 GOTY"
+                # Update custom_result if it was a custom location flow
+                if custom_result:
+                    custom_result["game_name"] = selected_game
+            elif clicked != normal_btn:
+                # User cancelled
+                return
 
         # Find the selected game data
         selected_game_data = None
@@ -2416,7 +2463,7 @@ class MO2MergerGUI(QMainWindow):
                         self.data_output_edit.setText(game.get("data_path", ""))
                         self.plugins_output_edit.setText(get_prefix_from_plugins_path(game.get("plugins_path", "")))
                         # Update downgrade button visibility
-                        self.downgrade_btn.setVisible(game_name == "Fallout 3")
+                        self.downgrade_btn.setVisible(game_name in ("Fallout 3", "Fallout 3 GOTY"))
                         self.update_build_button()
                         return
                 return
@@ -2440,7 +2487,7 @@ class MO2MergerGUI(QMainWindow):
             self.plugins_output_edit.setText(get_prefix_from_plugins_path(game_data.get("plugins_path", "")))
 
         # Show Downgrade button only for Fallout 3
-        is_fallout3 = game_data is not None and game_data.get("name") == "Fallout 3"
+        is_fallout3 = game_data is not None and game_data.get("name") in ("Fallout 3", "Fallout 3 GOTY")
         self.downgrade_btn.setVisible(is_fallout3)
 
         self.update_build_button()
@@ -2702,7 +2749,7 @@ class MO2MergerGUI(QMainWindow):
     def run_downgrade(self):
         """Downgrade Fallout 3 using the Updated Unofficial Fallout 3 Patch patcher."""
         game_data = self.game_combo.currentData()
-        if game_data is None or game_data.get("name") != "Fallout 3":
+        if game_data is None or game_data.get("name") not in ("Fallout 3", "Fallout 3 GOTY"):
             return
 
         data_path = game_data.get("data_path", "")

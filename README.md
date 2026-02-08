@@ -15,6 +15,7 @@ This tool allows you to easily set up and run **Mod Organiser 2** to manage your
 - Skyrim
 - Fallout 4
 - Fallout 3
+- Fallout 3 Goty Edition
 - Fallout New Vegas
 - Oblivion
 
