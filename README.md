@@ -18,13 +18,13 @@ This tool allows you to easily set up and run **Mod Organiser 2** to manage your
 - Fallout 3 Goty Edition
 - Fallout New Vegas
 - Oblivion
+- Oblivion Remastered - **Needs testing**
 
 ---
 
 ## Not Currently Supported
 
-- Morrowind - Needs testing
-- Oblivion Remastered - Needs testing
+- Morrowind - Added but broken
 - Any other game that Mod organiser supports - Might add support in the future
 
 ---

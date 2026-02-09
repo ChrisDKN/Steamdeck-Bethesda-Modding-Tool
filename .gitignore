@@ -3,7 +3,6 @@ __pycache__/gui_logic.cpython-313.pyc
 __pycache__/gui.cpython-313.pyc
 __pycache__/utils.cpython-313.pyc
 Appimage/appimagetool-x86_64.AppImage
-Appimage/MO2Manager-x86_64.AppImage
 Appimage/MO2Manager.AppDir/.DirIcon
 Appimage/MO2Manager.AppDir/AppRun
 Appimage/MO2Manager.AppDir/mo2manager.desktop
@@ -394,3 +393,5 @@ Appimage/MO2Manager.AppDir/usr/share/applications/mo2manager.desktop
 src/__pycache__/utils.cpython-313.pyc
 src/__pycache__/build_json.cpython-313.pyc
 src/__pycache__/build_data_folder.cpython-313.pyc
+.claude/settings.local.json
+src/__pycache__/gui.cpython-313.pyc

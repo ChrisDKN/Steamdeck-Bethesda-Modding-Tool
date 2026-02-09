@@ -114,10 +114,51 @@ def load_game_paths():
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return data.get("games", [])
+                games = data.get("games", [])
+                _migrate_game_fields(games)
+                return games
         except (json.JSONDecodeError, IOError):
             pass
     return []
+
+
+def _migrate_game_fields(games):
+    """Backfill new fields (game_root, data_subpath, launcher_location) from defaults."""
+    defaults = build_json.get_default_game_paths()
+    defaults_by_name = {g["name"]: g for g in defaults["games"]}
+    for game in games:
+        name = game.get("name", "")
+        default = defaults_by_name.get(name, {})
+        # Migrate launcer_location typo -> launcher_location
+        if "launcer_location" in game and "launcher_location" not in game:
+            game["launcher_location"] = game.pop("launcer_location")
+        elif "launcer_location" in game:
+            del game["launcer_location"]
+        # Backfill missing fields from defaults
+        for field in ("game_root", "data_subpath", "launcher_location",
+                       "mge_xe_download", "code_patch_download",
+                       "mo2_download_url", "plugins_path",
+                       "default_plugins_path"):
+            if field not in game and field in default:
+                game[field] = default[field]
+        # Migrate Oblivion Remastered data_subpath and data_path to Content folder
+        if name == "Oblivion Remastered":
+            old_subpath = "OblivionRemastered/Content/Dev/ObvData"
+            new_subpath = default.get("data_subpath", "OblivionRemastered/Content")
+            if game.get("data_subpath") == old_subpath:
+                game["data_subpath"] = new_subpath
+                game_root = game.get("game_root", "")
+                if game_root:
+                    game["data_path"] = os.path.join(game_root, new_subpath)
+        # If game_root was customized but data_path still points to the default,
+        # rebuild data_path from game_root + data_subpath
+        game_root = game.get("game_root", "")
+        default_game_root = default.get("game_root", "")
+        default_data_path = default.get("data_path", "")
+        if (game_root and default_game_root and game_root != default_game_root
+                and game.get("data_path") == default_data_path):
+            data_subpath = game.get("data_subpath", "Data")
+            game["data_path"] = os.path.join(game_root, data_subpath)
 
 
 def save_game_paths(game_paths):
@@ -222,11 +263,9 @@ def scan_for_mo2_instances():
     # Also scan configured game directories as a fallback
     game_paths = load_game_paths()
     for game in game_paths:
-        data_path = game.get("data_path", "")
-        if data_path:
-            game_folder = os.path.dirname(data_path)
-            if os.path.isdir(game_folder):
-                scan_roots.append(game_folder)
+        game_folder = game.get("game_root") or (os.path.dirname(game.get("data_path", "")) if game.get("data_path") else "")
+        if game_folder and os.path.isdir(game_folder):
+            scan_roots.append(game_folder)
 
     skip_dirs = {'node_modules', '__pycache__', '.git', '.cache', 'Trash',
                  '.build_venv', '.venv', 'venv'}
@@ -253,12 +292,12 @@ def scan_for_mo2_instances():
     return instances
 
 
-def detect_proton_path(plugins_path):
-    """Detect the Proton binary path from a game's plugins_path.
+def detect_proton_path(prefix_path):
+    """Detect the Proton binary path from a game's prefix_path.
 
     Args:
-        plugins_path: Full path like
-            .../compatdata/489830/pfx/drive_c/users/steamuser/AppData/Local/...
+        prefix_path: Path to the Wine prefix like
+            .../compatdata/489830/pfx/drive_c/users/steamuser/AppData/Local
 
     Returns:
         tuple: (proton_path, compat_data_path) on success
@@ -266,14 +305,14 @@ def detect_proton_path(plugins_path):
     Raises:
         ValueError: with descriptive message if detection fails
     """
-    if not plugins_path:
-        raise ValueError("No plugins path configured for this game.")
+    if not prefix_path:
+        raise ValueError("No prefix path configured for this game.")
 
-    pfx_index = plugins_path.find("/pfx/")
+    pfx_index = prefix_path.find("/pfx/")
     if pfx_index == -1:
-        raise ValueError("Could not determine Wine prefix from plugins path.")
+        raise ValueError("Could not determine Wine prefix from prefix path.")
 
-    compat_data_path = plugins_path[:pfx_index]
+    compat_data_path = prefix_path[:pfx_index]
 
     if not os.path.isdir(compat_data_path):
         raise ValueError(f"Compatdata folder not found:\n{compat_data_path}")
@@ -327,10 +366,11 @@ class DownloadWorker(QThread):
 
     MO2_DOWNLOAD_URL = "https://github.com/ModOrganizer2/modorganizer/releases/download/v2.5.2/Mod.Organizer-2.5.2.7z"
 
-    def __init__(self, destination_folder, game_data=None):
+    def __init__(self, destination_folder, game_data=None, local_archive=None):
         super().__init__()
         self.destination_folder = destination_folder
         self.game_data = game_data
+        self.local_archive = local_archive
 
     def run(self):
         try:
@@ -338,34 +378,39 @@ class DownloadWorker(QThread):
             os.makedirs(self.destination_folder, exist_ok=True)
             self.output_signal.emit(f"Destination: {self.destination_folder}")
 
-            # Download to temp file
-            self.output_signal.emit(f"Downloading Mod Organizer 2...")
-            self.output_signal.emit(f"URL: {self.MO2_DOWNLOAD_URL}")
+            if self.local_archive:
+                # Use user-provided archive instead of downloading
+                temp_file = self.local_archive
+                self.output_signal.emit(f"Using local archive: {temp_file}")
+            else:
+                # Download to temp file
+                self.output_signal.emit(f"Downloading Mod Organizer 2...")
+                self.output_signal.emit(f"URL: {self.MO2_DOWNLOAD_URL}")
 
-            # Create temp file for download
-            temp_file = os.path.join(tempfile.gettempdir(), "Mod.Organizer-2.5.2.7z")
+                # Create temp file for download
+                temp_file = os.path.join(tempfile.gettempdir(), "Mod.Organizer-2.5.2.7z")
 
-            # Download with progress using SSL context (required for AppImage)
-            ssl_context = ssl.create_default_context(cafile=certifi.where())
-            request = urllib.request.Request(self.MO2_DOWNLOAD_URL)
+                # Download with progress using SSL context (required for AppImage)
+                ssl_context = ssl.create_default_context(cafile=certifi.where())
+                request = urllib.request.Request(self.MO2_DOWNLOAD_URL)
 
-            with urllib.request.urlopen(request, context=ssl_context) as response:
-                total_size = int(response.headers.get('Content-Length', 0))
-                block_size = 8192
-                downloaded = 0
+                with urllib.request.urlopen(request, context=ssl_context) as response:
+                    total_size = int(response.headers.get('Content-Length', 0))
+                    block_size = 8192
+                    downloaded = 0
 
-                with open(temp_file, 'wb') as f:
-                    while True:
-                        block = response.read(block_size)
-                        if not block:
-                            break
-                        f.write(block)
-                        downloaded += len(block)
-                        if total_size > 0:
-                            progress = int(downloaded * 100 / total_size)
-                            self.progress_signal.emit(min(progress, 100))
+                    with open(temp_file, 'wb') as f:
+                        while True:
+                            block = response.read(block_size)
+                            if not block:
+                                break
+                            f.write(block)
+                            downloaded += len(block)
+                            if total_size > 0:
+                                progress = int(downloaded * 100 / total_size)
+                                self.progress_signal.emit(min(progress, 100))
 
-            self.output_signal.emit("Download complete!")
+                self.output_signal.emit("Download complete!")
 
             # Extract using py7zr (preferred in AppImage) or system 7z
             self.output_signal.emit("Extracting archive...")
@@ -401,8 +446,8 @@ class DownloadWorker(QThread):
                     raise Exception(f"Extraction failed: {result.stderr}")
                 self.output_signal.emit("Extraction complete!")
 
-            # Clean up temp file
-            if os.path.exists(temp_file):
+            # Clean up temp file (only if we downloaded it)
+            if not self.local_archive and os.path.exists(temp_file):
                 os.remove(temp_file)
                 self.output_signal.emit("Cleaned up temporary files.")
 
@@ -437,8 +482,8 @@ class DownloadWorker(QThread):
             game_name = "Fallout 3"
         data_path = self.game_data.get("data_path", "")
 
-        # Get game folder (parent of Data folder)
-        game_folder = os.path.dirname(data_path) if data_path else ""
+        # Get game folder
+        game_folder = self.game_data.get("game_root") or (os.path.dirname(data_path) if data_path else "")
 
         # Convert Linux path to Wine Z: drive path
         # /home/deck/... -> Z:\\home\\deck\\...
@@ -466,13 +511,13 @@ style=1809 Dark Mode.qss
 
     def install_vcredist(self):
         """Download and install Visual C++ Redistributable into the game's Wine prefix."""
-        plugins_path = self.game_data.get("plugins_path", "")
-        if not plugins_path:
-            self.output_signal.emit("Skipping vcredist: no plugins path configured.")
+        prefix_path = self.game_data.get("prefix_path", "")
+        if not prefix_path:
+            self.output_signal.emit("Skipping vcredist: no prefix path configured.")
             return
 
         try:
-            proton_path, compat_data_path = detect_proton_path(plugins_path)
+            proton_path, compat_data_path = detect_proton_path(prefix_path)
         except ValueError as e:
             self.output_signal.emit(f"Skipping vcredist: {e}")
             return
@@ -593,6 +638,11 @@ class BuildWorker(QThread):
                     plugins_source = os.path.join(modlist_dir, 'plugins.txt')
 
                     if os.path.exists(plugins_source):
+                        # Some games (e.g. Oblivion Remastered) have plugins.txt
+                        # inside the game folder rather than a wine prefix. Detect
+                        # this so we can log appropriately.
+                        plugins_in_game_folder = "/pfx/" not in self.plugins_dest
+
                         print()
                         print("=" * 70)
                         print("PLUGINS.TXT SYMLINK")
@@ -603,11 +653,14 @@ class BuildWorker(QThread):
                         # Create destination directory if needed
                         if not os.path.exists(self.plugins_dest):
                             os.makedirs(self.plugins_dest)
+                            print(f"Created directory: {self.plugins_dest}")
 
                         plugins_dest_file = os.path.join(self.plugins_dest, 'plugins.txt')
 
-                        # Remove existing plugins.txt
+                        # Remove existing plugins.txt (regular file or symlink)
                         if os.path.exists(plugins_dest_file) or os.path.islink(plugins_dest_file):
+                            if plugins_in_game_folder:
+                                print(f"Removing existing plugins.txt (inside data folder)...")
                             os.remove(plugins_dest_file)
 
                         # Create symlink
@@ -616,13 +669,15 @@ class BuildWorker(QThread):
                         print("=" * 70)
 
                 # Handle script extender launcher swap
-                if self.game_data:
+                # Skip for games where launcher is in a different dir than game_root
+                # (e.g. UE5 games like Oblivion Remastered) — swap breaks them
+                if self.game_data and self.game_data.get("launcher_location", "") == self.game_data.get("game_root", ""):
                     launcher_name = self.game_data.get("launcher_name")
                     script_extender_name = self.game_data.get("script_extender_name")
 
                     if launcher_name and script_extender_name:
-                        # Get the game folder (parent of Data folder)
-                        game_folder = os.path.dirname(self.output_dir)
+                        # Get the launcher directory
+                        game_folder = self.game_data.get("launcher_location") or self.game_data.get("game_root") or os.path.dirname(self.output_dir)
                         launcher_path = os.path.join(game_folder, launcher_name)
                         script_extender_path = os.path.join(game_folder, script_extender_name)
                         backup_path = os.path.join(game_folder, launcher_name.replace(".exe", ".bak"))
@@ -664,3 +719,17 @@ class BuildWorker(QThread):
             self.output_signal.emit(f"ERROR: {str(e)}")
             self.output_signal.emit(traceback.format_exc())
             self.finished_signal.emit(False, f"Build failed: {str(e)}")
+
+def get_steam_id(game):
+    steam_id = {
+        "Skyrim Special Edition" : "489830",
+        "Skyrim" :                 "72850",
+        "Fallout 4" :              "377160",
+        "Fallout 3" :              "22300",
+        "Fallout 3 GOTY" :         "22370",
+        "New Vegas" :              "22380",
+        "Oblivion" :               "22330",
+        "Oblivion Remastered" :    "2623190",
+        "Morrowind" :              "22320"
+    }
+    return steam_id[game]
