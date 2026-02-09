@@ -994,6 +994,12 @@ class MO2MergerGUI(QMainWindow):
         env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = os.path.expanduser("~/.local/share/Steam")
         env["STEAM_COMPAT_DATA_PATH"] = compat_data_path
 
+        # Newer MO2 builds (e.g. for Oblivion Remastered) crash with
+        # "free(): unaligned chunk detected in tcache 2" due to glibc
+        # allocator conflicts under Proton. Clearing LD_PRELOAD fixes this.
+        if game_data.get("mo2_download_url"):
+            env.pop("LD_PRELOAD", None)
+
         proton_name = os.path.basename(os.path.dirname(proton_path))
 
         try:
@@ -1590,15 +1596,9 @@ class MO2MergerGUI(QMainWindow):
                 if game.get("data_path") == new_data_path:
                     return
                 game["data_path"] = new_data_path
-                # For Oblivion Remastered, plugins.txt lives in the Data folder,
-                # so plugins_path must always match data_path
-                if game_name == "Oblivion Remastered":
-                    game["plugins_path"] = new_data_path
                 break
         utils.save_game_paths(self.game_paths)
         self.append_log(f"Updated data_path for {game_name}: {new_data_path}")
-        if game_name == "Oblivion Remastered":
-            self.append_log(f"Updated plugins_path for {game_name}: {new_data_path}")
         self._refresh_game_combo()
 
     def _update_game_prefix_path(self, game_name, new_prefix_path):
@@ -1650,12 +1650,45 @@ class MO2MergerGUI(QMainWindow):
 
     def _start_mo2_download(self, folder, selected_game_data):
         """Start the MO2 download/install worker for a given folder and game."""
+        local_archive = None
+        mo2_download_url = selected_game_data.get("mo2_download_url")
+        if mo2_download_url:
+            # Game requires a manually downloaded MO2 version (e.g. OneDrive link)
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setWindowTitle("Manual MO2 Download Required")
+            msg.setText(
+                f"{selected_game_data.get('name', 'This game')} requires a specific version of "
+                "Mod Organizer 2 that must be downloaded manually.\n\n"
+                "Download the MO2 archive from the link, then select the downloaded file."
+            )
+            msg.addButton("Open Download Page", QMessageBox.ButtonRole.ActionRole)
+            select_btn = msg.addButton("Select Archive", QMessageBox.ButtonRole.AcceptRole)
+            msg.addButton(QMessageBox.StandardButton.Cancel)
+            msg.exec()
+
+            clicked = msg.clickedButton()
+            if clicked is None or clicked.text() == "Cancel":
+                return
+
+            if clicked.text() == "Open Download Page":
+                subprocess.Popen(["xdg-open", mo2_download_url], env=utils.get_clean_env())
+
+            local_archive, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select Downloaded MO2 Archive",
+                os.path.expanduser("~/Downloads"),
+                "Archives (*.zip *.7z);;All Files (*)"
+            )
+            if not local_archive:
+                return
+
         self.log_text.clear()
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.add_instance_btn.setEnabled(False)
 
-        self.download_worker = utils.DownloadWorker(folder, selected_game_data)
+        self.download_worker = utils.DownloadWorker(folder, selected_game_data, local_archive=local_archive)
         self.download_worker.output_signal.connect(self.append_log)
         self.download_worker.progress_signal.connect(self.progress_bar.setValue)
         self.download_worker.finished_signal.connect(self.download_finished)
@@ -1812,13 +1845,13 @@ class MO2MergerGUI(QMainWindow):
                         prefix_suffix = default_prefix[pfx_index:]
                         custom_prefix_path = prefix_folder + prefix_suffix
 
-                    # Build custom plugins_path (except Oblivion Remastered)
-                    if name != "Oblivion Remastered":
-                        default_pp = game_cfg.get("plugins_path", "")
-                        pp_pfx_index = default_pp.find("/pfx/")
-                        if pp_pfx_index != -1:
-                            suffix = default_pp[pp_pfx_index:]
-                            custom_plugins_path = prefix_folder + suffix
+                    # Build custom plugins_path (only for games where plugins.txt
+                    # lives in the wine prefix, detected by /pfx/ in the path)
+                    default_pp = game_cfg.get("plugins_path", "")
+                    pp_pfx_index = default_pp.find("/pfx/")
+                    if pp_pfx_index != -1:
+                        suffix = default_pp[pp_pfx_index:]
+                        custom_plugins_path = prefix_folder + suffix
 
             custom_result["game_name"] = name
             custom_result["game_folder"] = gfolder
@@ -1895,14 +1928,30 @@ class MO2MergerGUI(QMainWindow):
         data_subpath = selected_game_data.get("data_subpath", "Data") if selected_game_data else "Data"
         self._update_game_data_path(selected_game, os.path.join(actual_game_root, data_subpath))
 
+        # For games where plugins_path is inside the game folder (not a wine
+        # prefix), rebuild it relative to the actual game root.
+        if selected_game_data:
+            default_pp = selected_game_data.get("default_plugins_path", "")
+            if default_pp and "/pfx/" not in default_pp:
+                default_game_root = selected_game_data.get("game_root", "")
+                if default_game_root:
+                    try:
+                        pp_rel = os.path.relpath(default_pp, default_game_root)
+                    except ValueError:
+                        pp_rel = ""
+                    if pp_rel and pp_rel != ".":
+                        new_pp = os.path.join(actual_game_root, pp_rel)
+                        self._update_game_plugins_path(selected_game, new_pp)
+
         # Update prefix_path and plugins_path: use custom prefix if provided, otherwise reset to default
         if custom_result and custom_result.get("prefix_path"):
             self._update_game_prefix_path(selected_game, custom_result["prefix_path"])
         if custom_result and custom_result.get("plugins_path"):
             self._update_game_plugins_path(selected_game, custom_result["plugins_path"])
         elif custom_result and selected_game_data:
-            default_pp = selected_game_data.get("default_plugins_path")
-            if default_pp:
+            default_pp = selected_game_data.get("default_plugins_path", "")
+            # Only fall back to default_plugins_path for prefix-based paths
+            if default_pp and "/pfx/" in default_pp:
                 self._update_game_plugins_path(selected_game, default_pp)
 
         # Create subfolder named "<game name> MO2"
@@ -2273,15 +2322,14 @@ class MO2MergerGUI(QMainWindow):
         # Update prefix_path always
         self._update_game_prefix_path(game_name, new_prefix_path)
 
-        # Update plugins_path too, except for Oblivion Remastered
-        # (its plugins.txt doesn't go in the prefix)
-        if game_name != "Oblivion Remastered":
-            default_pp = game_data.get("default_plugins_path", game_data.get("plugins_path", ""))
-            pp_pfx_index = default_pp.find("/pfx/")
-            if pp_pfx_index != -1:
-                plugins_suffix = default_pp[pp_pfx_index:]
-                new_plugins_path = prefix_folder + plugins_suffix
-                self._update_game_plugins_path(game_name, new_plugins_path)
+        # Update plugins_path too (only for games where plugins.txt is in the
+        # wine prefix — detected by /pfx/ in the path)
+        default_pp = game_data.get("default_plugins_path", game_data.get("plugins_path", ""))
+        pp_pfx_index = default_pp.find("/pfx/")
+        if pp_pfx_index != -1:
+            plugins_suffix = default_pp[pp_pfx_index:]
+            new_plugins_path = prefix_folder + plugins_suffix
+            self._update_game_plugins_path(game_name, new_plugins_path)
 
     def run_exe_in_game_prefix(self):
         """Run an executable in the selected game's Wine prefix using its Proton version."""

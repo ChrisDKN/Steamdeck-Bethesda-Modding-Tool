@@ -103,15 +103,16 @@ def get_default_game_paths():
         {
             "name": "Oblivion Remastered",
             "prefix_path": os.path.join(steam_compat, utils.get_steam_id("Oblivion Remastered"), pfx_path),
-            "data_path": os.path.join(steam_common, "Oblivion Remastered/OblivionRemastered/Content/Dev/ObvData"),
+            "data_path": os.path.join(steam_common, "Oblivion Remastered/OblivionRemastered/Content"),
             "plugins_path": os.path.join(steam_common, "Oblivion Remastered/OblivionRemastered/Content/Dev/ObvData/Data"),
             "default_plugins_path": os.path.join(steam_common, "Oblivion Remastered/OblivionRemastered/Content/Dev/ObvData/Data"),
             "launcher_name": "OblivionRemastered-Win64-Shipping.exe",
             "launcher_location": os.path.join(steam_common, "Oblivion Remastered/OblivionRemastered/Binaries/Win64"),
             "game_root": os.path.join(steam_common, "Oblivion Remastered"),
-            "data_subpath": "OblivionRemastered/Content/Dev/ObvData",
+            "data_subpath": "OblivionRemastered/Content",
             "script_extender_name": "obse64_loader.exe",
-            "script_extender_download": "https://www.nexusmods.com/oblivionremastered/mods/282"
+            "script_extender_download": "https://www.nexusmods.com/oblivionremastered/mods/282",
+            "mo2_download_url": "https://onedrive.live.com/?redeem=aHR0cHM6Ly8xZHJ2Lm1zL3UvYy8zNzEyNzJjNDlhMzdjYzRhL0VkR21OTHFrNDNoQmxfX3BEZ2dXb0NjQlJUOFQxTl9oZC1vM0hrZFdBRHFQdEE&cid=371272C49A37CC4A&id=371272C49A37CC4A%21sba34a6d1e3a4417897ffe90e0816a027&parId=371272C49A37CC4A%21148600&o=OneUp"
         },
         {
             "name": "Morrowind",
