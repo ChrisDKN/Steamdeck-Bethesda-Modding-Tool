@@ -114,10 +114,40 @@ def load_game_paths():
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return data.get("games", [])
+                games = data.get("games", [])
+                _migrate_game_fields(games)
+                return games
         except (json.JSONDecodeError, IOError):
             pass
     return []
+
+
+def _migrate_game_fields(games):
+    """Backfill new fields (game_root, data_subpath, launcher_location) from defaults."""
+    defaults = build_json.get_default_game_paths()
+    defaults_by_name = {g["name"]: g for g in defaults["games"]}
+    for game in games:
+        name = game.get("name", "")
+        default = defaults_by_name.get(name, {})
+        # Migrate launcer_location typo -> launcher_location
+        if "launcer_location" in game and "launcher_location" not in game:
+            game["launcher_location"] = game.pop("launcer_location")
+        elif "launcer_location" in game:
+            del game["launcer_location"]
+        # Backfill missing fields from defaults
+        for field in ("game_root", "data_subpath", "launcher_location",
+                       "mge_xe_download", "code_patch_download"):
+            if field not in game and field in default:
+                game[field] = default[field]
+        # If game_root was customized but data_path still points to the default,
+        # rebuild data_path from game_root + data_subpath
+        game_root = game.get("game_root", "")
+        default_game_root = default.get("game_root", "")
+        default_data_path = default.get("data_path", "")
+        if (game_root and default_game_root and game_root != default_game_root
+                and game.get("data_path") == default_data_path):
+            data_subpath = game.get("data_subpath", "Data")
+            game["data_path"] = os.path.join(game_root, data_subpath)
 
 
 def save_game_paths(game_paths):
@@ -222,11 +252,9 @@ def scan_for_mo2_instances():
     # Also scan configured game directories as a fallback
     game_paths = load_game_paths()
     for game in game_paths:
-        data_path = game.get("data_path", "")
-        if data_path:
-            game_folder = os.path.dirname(data_path)
-            if os.path.isdir(game_folder):
-                scan_roots.append(game_folder)
+        game_folder = game.get("game_root") or (os.path.dirname(game.get("data_path", "")) if game.get("data_path") else "")
+        if game_folder and os.path.isdir(game_folder):
+            scan_roots.append(game_folder)
 
     skip_dirs = {'node_modules', '__pycache__', '.git', '.cache', 'Trash',
                  '.build_venv', '.venv', 'venv'}
@@ -253,12 +281,12 @@ def scan_for_mo2_instances():
     return instances
 
 
-def detect_proton_path(plugins_path):
-    """Detect the Proton binary path from a game's plugins_path.
+def detect_proton_path(prefix_path):
+    """Detect the Proton binary path from a game's prefix_path.
 
     Args:
-        plugins_path: Full path like
-            .../compatdata/489830/pfx/drive_c/users/steamuser/AppData/Local/...
+        prefix_path: Path to the Wine prefix like
+            .../compatdata/489830/pfx/drive_c/users/steamuser/AppData/Local
 
     Returns:
         tuple: (proton_path, compat_data_path) on success
@@ -266,14 +294,14 @@ def detect_proton_path(plugins_path):
     Raises:
         ValueError: with descriptive message if detection fails
     """
-    if not plugins_path:
-        raise ValueError("No plugins path configured for this game.")
+    if not prefix_path:
+        raise ValueError("No prefix path configured for this game.")
 
-    pfx_index = plugins_path.find("/pfx/")
+    pfx_index = prefix_path.find("/pfx/")
     if pfx_index == -1:
-        raise ValueError("Could not determine Wine prefix from plugins path.")
+        raise ValueError("Could not determine Wine prefix from prefix path.")
 
-    compat_data_path = plugins_path[:pfx_index]
+    compat_data_path = prefix_path[:pfx_index]
 
     if not os.path.isdir(compat_data_path):
         raise ValueError(f"Compatdata folder not found:\n{compat_data_path}")
@@ -437,8 +465,8 @@ class DownloadWorker(QThread):
             game_name = "Fallout 3"
         data_path = self.game_data.get("data_path", "")
 
-        # Get game folder (parent of Data folder)
-        game_folder = os.path.dirname(data_path) if data_path else ""
+        # Get game folder
+        game_folder = self.game_data.get("game_root") or (os.path.dirname(data_path) if data_path else "")
 
         # Convert Linux path to Wine Z: drive path
         # /home/deck/... -> Z:\\home\\deck\\...
@@ -466,13 +494,13 @@ style=1809 Dark Mode.qss
 
     def install_vcredist(self):
         """Download and install Visual C++ Redistributable into the game's Wine prefix."""
-        plugins_path = self.game_data.get("plugins_path", "")
-        if not plugins_path:
-            self.output_signal.emit("Skipping vcredist: no plugins path configured.")
+        prefix_path = self.game_data.get("prefix_path", "")
+        if not prefix_path:
+            self.output_signal.emit("Skipping vcredist: no prefix path configured.")
             return
 
         try:
-            proton_path, compat_data_path = detect_proton_path(plugins_path)
+            proton_path, compat_data_path = detect_proton_path(prefix_path)
         except ValueError as e:
             self.output_signal.emit(f"Skipping vcredist: {e}")
             return
@@ -621,8 +649,8 @@ class BuildWorker(QThread):
                     script_extender_name = self.game_data.get("script_extender_name")
 
                     if launcher_name and script_extender_name:
-                        # Get the game folder (parent of Data folder)
-                        game_folder = os.path.dirname(self.output_dir)
+                        # Get the launcher directory
+                        game_folder = self.game_data.get("launcher_location") or self.game_data.get("game_root") or os.path.dirname(self.output_dir)
                         launcher_path = os.path.join(game_folder, launcher_name)
                         script_extender_path = os.path.join(game_folder, script_extender_name)
                         backup_path = os.path.join(game_folder, launcher_name.replace(".exe", ".bak"))
