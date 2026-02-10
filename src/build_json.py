@@ -49,6 +49,19 @@ def get_default_game_paths():
             "script_extender_download": "https://f4se.silverlock.org/"
         },
         {
+            "name": "Fallout London",
+            "prefix_path": os.path.join(steam_compat, "folon", pfx_path),
+            "data_path": os.path.join(steam_common, "Fallout London/Data"),
+            "plugins_path": os.path.join(steam_compat, "folon", pfx_path, "Fallout4"),
+            "default_plugins_path": os.path.join(steam_compat, "folon", pfx_path, "Fallout4"),
+            "launcher_name": "Fallout4Launcher.exe",
+            "launcher_location": os.path.join(steam_common, "Fallout London"),
+            "game_root": os.path.join(steam_common, "Fallout London"),
+            "data_subpath": "Data",
+            "script_extender_name": "f4se_loader.exe",
+            "script_extender_download": "https://f4se.silverlock.org/"
+        },
+        {
             "name": "Fallout 3",
             "prefix_path": os.path.join(steam_compat, utils.get_steam_id("Fallout 3"), pfx_path),
             "data_path": os.path.join(steam_common, "Fallout 3/Data"),
