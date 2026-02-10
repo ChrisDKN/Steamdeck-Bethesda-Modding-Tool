@@ -18,6 +18,7 @@ The solution is to make our own Virtual file system by using the modlist.txt tha
 - Skyrim Special Edition
 - Skyrim
 - Fallout 4
+- [Fallout London*](#Fallout-London)
 - Fallout 3
 - Fallout 3 Goty Edition
 - Fallout New Vegas
@@ -109,3 +110,76 @@ If the game is not in the default Steam common folder or on an SD card or if you
 4. Locate the Wine prefix used by the game (the folder containing the `pfx` folder).
 
 > The config in `~/.config/MO2Manager/` will update with the custom locations. If you need to move anything, you can edit this file or create a new instance.
+
+---
+
+## Fallout London
+
+The application supports Fallout London but does not install it. I will explain the basics of installing Fallout London first in such a way that we can also still play Fallout 4 along side it. It's a bit of a manual process but it's not too bad.
+
+1. Create a folder in "/home/deck/.local/share/Steam/steamapps/common/" called Fallout London
+2. Open the Steam client Console by entering steam://open/console in your web browser (in the url bar)
+3. In the steam client you will see a console tab (where store,library,community are)
+4. You need to enter these **1 at a time** you **can't** paste them all at the same time but you don't have to wait for one to finish before entering the other.
+   > There will be no progress bar, but will download about 40gb of Data
+   >
+   > We are doing this because this is the version Fallout London requires to work
+   >
+   > download_depot 377160 377161 7497069378349273908
+   >
+   > download_depot 377160 377163 5819088023757897745
+   >
+   > download_depot 377160 377162 5847529232406005096
+   >
+   > download_depot 377160 377164 2178106366609958945
+   >
+   > download_depot 377160 435870 1691678129192680960
+   >
+   > download_depot 377160 435871 5106118861901111234
+   >
+   > download_depot 377160 435880 1255562923187931216
+   >
+   > download_depot 377160 435881 1207717296920736193
+   >
+   > download_depot 377160 435882 8482181819175811242
+   >
+   > download_depot 377160 480630 5527412439359349504
+   >
+   > download_depot 377160 480631 6588493486198824788
+   >
+   > download_depot 377160 393885 5000262035721758737
+   >
+   > download_depot 377160 490650 4873048792354485093
+   >
+   > download_depot 377160 393895 7677765994120765493
+5. The files will be sent to "/home/deck/.local/share/Steam/ubuntu12_32/steamapps/content/app_377160/"
+6. Make sure they are all fully downloaded before proceeding,
+7. Move the contents of each folder to the Fallout London folder we made earlier. There should be 14 in total
+8. Right click the Fallout4Launcher.exe in the Fallout London folder and add to steam
+9. in steam, search for the Fallout4Launcher.exe we just added and right click > properties
+   > Rename it to Fallout London
+   >
+   > add this launch option STEAM_COMPAT_DATA_PATH="/home/deck/.local/share/Steam/steamapps/compatdata/folon" %command%
+   >
+   > In the compatibility tab set it to proton 10
+   >
+   > Go to "/home/deck/.local/share/Steam/steamapps/compatdata/"
+   >
+   > Create an empty folder called folon
+   >
+   > Our launch exe and prefix should now be separate from the main Fallout 4 folder and we can use this to launch Fallout london
+10. Run the unmodded game once to allow the prefix to build and for the files/registry to be generated
+11. You will need to download the Fallout London files using the heroic launcher.
+   > You will need a gog account as well as heroic launcher from the discover store,
+   >
+   > Redeem Fallout London while logged in to your gog account
+   >
+   > Log into your gog account on the heroic launcher
+   >
+   > download Fallout London
+12. Move the files from the heroic download location to the Fallout London folder we made earlier
+   > Mine were in /home/deck/Games/Heroic/ but yours may be different
+13. You can now add a Fallout London instance in the application
+   > Run Mo2 once > refresh the UI and build data folder (Double check the output locations are correct)
+14. Launch Fallout London via the non steam game we made earlier
+

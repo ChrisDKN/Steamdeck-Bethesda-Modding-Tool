@@ -227,6 +227,14 @@ def _scan_for_launchers(game_paths, scan_roots):
                     for game in launcher_lookup[lower_name]:
                         game_name = game.get("name", "")
                         if game_name not in found:
+                            # When multiple games share a launcher, use
+                            # launcher_location to disambiguate so that
+                            # e.g. Fallout 4 and Fallout London each map
+                            # to their own folder.
+                            expected = game.get("launcher_location", "")
+                            if expected and os.path.isdir(expected):
+                                if os.path.normpath(game_folder) != os.path.normpath(expected):
+                                    continue
                             found[game_name] = game_folder
         # Stop early if all games found
         if len(found) >= len(game_paths):
@@ -475,9 +483,12 @@ class DownloadWorker(QThread):
         """Create the ModOrganizer.ini configuration file."""
         game_name = self.game_data.get("name", "")
         is_goty = game_name == "Fallout 3 GOTY"
+        is_london = "London" in game_name
         # MO2 doesn't recognize "GOTY" variants; use the base game name
         if is_goty:
             game_name = "Fallout 3"
+        if is_london:
+            game_name = "Fallout 4"
         data_path = self.game_data.get("data_path", "")
 
         # Get game folder
@@ -731,3 +742,23 @@ def get_steam_id(game):
         "Morrowind" :              "22320"
     }
     return steam_id[game]
+
+def folon_depot_files():
+    path = "home/deck/.local/share/Steam/ubuntu12_32/steamapps/content/app_377160"
+    path_id = [
+        os.path.join(path,"depot_377161"),
+        os.path.join(path,"depot_377162"),
+        os.path.join(path,"depot_377163"),
+        os.path.join(path,"depot_377164"),
+        os.path.join(path,"depot_393885"),
+        os.path.join(path,"depot_393895"),
+        os.path.join(path,"depot_435870"),
+        os.path.join(path,"depot_435871"),
+        os.path.join(path,"depot_435880"),
+        os.path.join(path,"depot_435881"),
+        os.path.join(path,"depot_435882"),
+        os.path.join(path,"depot_480630"),
+        os.path.join(path,"depot_480631"),
+        os.path.join(path,"depot_490650"),
+    ]
+    return path_id
