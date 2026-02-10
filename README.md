@@ -122,6 +122,7 @@ The application supports Fallout London but does not install it. I will explain 
 3. In the steam client you will see a console tab (where store,library,community are)
 4. You need to enter these **1 at a time** you **can't** paste them all at the same time but you don't have to wait for one to finish before entering the other.
    > There will be no progress bar, but will download about 40gb of Data
+   >
    > We are doing this because this is the version Fallout London requires to work
    >
    > download_depot 377160 377161 7497069378349273908
