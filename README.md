@@ -1,11 +1,15 @@
 # Bethesda Game Modding on the Steam Deck
 
-This tool allows you to easily set up and run **Mod Organiser 2** to manage your mods and plugins on the Steam Deck.
+This tool allows you to easily set up and run **Mod Organiser 2** to manage your mods and plugins on the Steam Deck. 
+
+I was originally frustrated with how slow a heavily modded Skyrim loads on the Steam Deck and discovered the reason is Mod organiser's virtual file system doesn't play nicely with the kernal and/or proton
+
+The solution is to make our own Virtual file system by using the modlist.txt that Mo2 creates and hard linking the required files to the Data directory. The hardlinked files take up no space and also load much faster than the files created by Mod organisers VFS.
 
 ### Key Features
-
-- **Automatic Data folder building** via hard linking all required files set by `modlist.txt`. This bypasses Mod Organiser's virtual file system, which is very slow on the Steam Deck. Boot times are much faster with larger mod lists, and you don't need to load MO2 every time you launch the game. You only need to rebuild the Data folder when you make a change within Mod Organiser (takes only a few seconds).
-- **Script Extender integration** — replaces the default launcher exe with the script extender exe, so hitting Play in Steam/Gaming Mode launches the game with script extender automatically without having to open Mod Organiser every time
+- **Easy Mod Organiser 2 Install** One click Mo2 install. Each game gets it's own instance. You can easily run Mod organiser through this application. No messing about adding Mo2 to steam or creating a new prefix for it. Just click run Mo2 and it will use the prefix and proton version the game you have selected uses to run it. 
+- **Faster game load times** via hard linking all required files set by `modlist.txt`. This bypasses Mod Organiser's virtual file system, which is very slow on the Steam Deck. Boot times are much faster with larger mod lists, and you don't need to load MO2 every time you launch the game. You only need to rebuild the Data folder when you make a change within Mod Organiser (takes only a few seconds).
+- **Script Extender integration** — replaces the default launcher exe with the script extender exe, so hitting Play in Steam/Gaming Mode launches the game with script extender automatically without having to open Mod Organiser every time or adding the script extender exe as a separate game.
 
 ---
 
