@@ -281,10 +281,8 @@ def scan_for_mo2_instances():
                     if mo2_folder in seen_paths:
                         continue
                     seen_paths.add(mo2_folder)
-                    # Create a friendly display name using the parent folder name
-                    parent_name = os.path.basename(mo2_folder)
-                    grandparent = os.path.basename(os.path.dirname(mo2_folder))
-                    display_name = f"{grandparent}/{parent_name}" if grandparent else parent_name
+                    # Use the grandparent folder as the display name (the game folder)
+                    display_name = os.path.basename(os.path.dirname(mo2_folder))
                     instances.append((display_name, mo2_folder))
 
     # Sort by path for consistent ordering

@@ -15,539 +15,98 @@ import zipfile
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QFileDialog, QComboBox,
-    QTextEdit, QGroupBox, QMessageBox, QProgressBar, QStackedWidget,
-    QInputDialog, QListWidget, QListWidgetItem, QSplitter, QFrame,
-    QCheckBox, QAbstractItemView, QDialog, QDialogButtonBox
+    QTextEdit, QGroupBox, QMessageBox, QProgressBar,
+    QInputDialog, QListWidget, QListWidgetItem,
+    QDialog, QDialogButtonBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
 import utils
 import build_json
 
 
-class ModlistPanel(QFrame):
-    """Panel to display and edit modlist.txt contents."""
+class InstancePanel(QWidget):
+    """Left sidebar panel showing all discovered MO2 instances as clickable items."""
+
+    instance_selected = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.modlist_path = None
-        self.show_priority = True
-        self.display_reversed = False  # Visual only - doesn't affect file
+        self.instances = []
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        # Header
-        header_layout = QHBoxLayout()
-        header_label = QLabel("Mod List")
-        header_label.setStyleSheet("font-weight: bold; font-size: 12px;")
-        header_layout.addWidget(header_label)
+        header = QLabel("MO2 Instances")
+        header.setStyleSheet("font-weight: bold; font-size: 13px;")
+        layout.addWidget(header)
 
-        # Refresh button
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setMaximumWidth(60)
-        refresh_btn.clicked.connect(self.load_modlist)
-        header_layout.addWidget(refresh_btn)
-
-        layout.addLayout(header_layout)
-
-        # Options row
-        options_layout = QHBoxLayout()
-
-        # Show priority checkbox
-        self.priority_checkbox = QCheckBox("Show Priority")
-        self.priority_checkbox.setChecked(True)
-        self.priority_checkbox.stateChanged.connect(self.on_priority_toggle)
-        options_layout.addWidget(self.priority_checkbox)
-
-        options_layout.addStretch()
-
-        # Reverse order button
-        self.reverse_btn = QPushButton("Reverse Order")
-        self.reverse_btn.setMaximumWidth(100)
-        self.reverse_btn.clicked.connect(self.reverse_order)
-        options_layout.addWidget(self.reverse_btn)
-
-        layout.addLayout(options_layout)
-
-        # Mod list widget with drag and drop
         self.list_widget = QListWidget()
-        self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        self.list_widget.itemChanged.connect(self.on_item_changed)
-        # Enable drag and drop reordering
-        self.list_widget.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.list_widget.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.list_widget.model().rowsMoved.connect(self.on_rows_moved)
+        self.list_widget.currentItemChanged.connect(self._on_item_changed)
         layout.addWidget(self.list_widget)
 
-        # Move buttons
-        buttons_layout = QHBoxLayout()
+        self.path_label = QLabel("No instance selected")
+        self.path_label.setStyleSheet("color: gray; font-size: 11px;")
+        self.path_label.setWordWrap(True)
+        layout.addWidget(self.path_label)
 
-        self.move_up_btn = QPushButton("Move Up")
-        self.move_up_btn.clicked.connect(self.move_up)
-        buttons_layout.addWidget(self.move_up_btn)
+        btn_layout = QHBoxLayout()
 
-        self.move_down_btn = QPushButton("Move Down")
-        self.move_down_btn.clicked.connect(self.move_down)
-        buttons_layout.addWidget(self.move_down_btn)
+        self.rescan_btn = QPushButton("Rescan")
+        self.rescan_btn.setToolTip("Scan for MO2 installations")
+        btn_layout.addWidget(self.rescan_btn)
 
-        layout.addLayout(buttons_layout)
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setToolTip("Refresh mod lists, plugin lists, and folder status")
+        btn_layout.addWidget(self.refresh_btn)
 
-        # Status label
-        self.status_label = QLabel("No modlist loaded")
-        self.status_label.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(self.status_label)
+        self.add_btn = QPushButton("Add Instance")
+        self.add_btn.setToolTip("Download and install a new MO2 instance")
+        btn_layout.addWidget(self.add_btn)
 
-    def set_modlist_path(self, path):
-        """Set the path to modlist.txt and load it."""
-        self.modlist_path = path
-        self.load_modlist()
+        layout.addLayout(btn_layout)
 
-    def load_modlist(self):
-        """Load and display the modlist.txt contents."""
-        # Block signals while populating to prevent unnecessary saves
+    def set_instances(self, instances):
+        """Populate the list with (display_name, folder_path) tuples."""
+        self.instances = instances
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
+        for display_name, folder_path in instances:
+            item = QListWidgetItem(display_name)
+            item.setData(Qt.ItemDataRole.UserRole, folder_path)
+            self.list_widget.addItem(item)
+        self.list_widget.blockSignals(False)
 
-        if not self.modlist_path or not os.path.isfile(self.modlist_path):
-            self.status_label.setText("No modlist loaded")
-            self.list_widget.blockSignals(False)
-            return
+    def _on_item_changed(self, current, previous):
+        """Handle list selection change."""
+        if current:
+            folder_path = current.data(Qt.ItemDataRole.UserRole)
+            self.path_label.setText(f"Path: {folder_path}")
+            self.instance_selected.emit(folder_path)
 
-        try:
-            with open(self.modlist_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-
-            # Parse mods from file
-            mods_data = []
-            enabled_count = 0
-
-            for line in lines:
-                line = line.rstrip('\n\r')
-                if not line.strip():
-                    continue
-
-                # Skip separator lines (starting with *)
-                if line.strip().startswith('*'):
-                    continue
-
-                if line.startswith('+'):
-                    mod_name = line[1:].strip()
-                    # Skip separator mods (pseudo mods used by MO2)
-                    if mod_name.endswith('_separator'):
-                        continue
-                    mods_data.append({'name': mod_name, 'enabled': True})
-                    enabled_count += 1
-                elif line.startswith('-'):
-                    mod_name = line[1:].strip()
-                    # Skip separator mods (pseudo mods used by MO2)
-                    if mod_name.endswith('_separator'):
-                        continue
-                    mods_data.append({'name': mod_name, 'enabled': False})
-
-            # If display is reversed, show in reverse order (but file order is preserved)
-            if self.display_reversed:
-                mods_data = list(reversed(mods_data))
-
-            # Populate the list widget
-            for mod in mods_data:
-                item = QListWidgetItem()
-                item.setData(Qt.ItemDataRole.UserRole, mod['name'])
-                item.setCheckState(Qt.CheckState.Checked if mod['enabled'] else Qt.CheckState.Unchecked)
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                self.list_widget.addItem(item)
-
-            # Update display text with priority numbers
-            self.update_display_text()
-
-            view_mode = " (reversed view)" if self.display_reversed else ""
-            self.status_label.setText(f"{enabled_count}/{len(mods_data)} mods enabled{view_mode}")
-
-        except Exception as e:
-            self.status_label.setText(f"Error: {str(e)}")
-        finally:
-            self.list_widget.blockSignals(False)
-
-    def update_display_text(self):
-        """Update the display text for all items based on priority setting.
-
-        Priority is calculated from the bottom of the file (bottom = 0 = highest priority).
-        This matches MO2's behavior where mods at the bottom win conflicts.
-        """
-        self.list_widget.blockSignals(True)
-        total_count = self.list_widget.count()
-        for i in range(total_count):
+    def select_by_path(self, path):
+        """Select the instance matching the given path, if any."""
+        for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
-            mod_name = item.data(Qt.ItemDataRole.UserRole)
-            # Calculate priority based on file position, not display position
-            if self.display_reversed:
-                # In reversed view, item 0 in display is the last in file (priority 0)
-                priority = i
-            else:
-                # In normal view, item 0 in display is first in file (highest priority number)
-                priority = total_count - 1 - i
-            if self.show_priority:
-                item.setText(f"[{priority}] {mod_name}")
-            else:
-                item.setText(mod_name)
-        self.list_widget.blockSignals(False)
-
-    def on_priority_toggle(self, state):
-        """Handle priority checkbox toggle."""
-        self.show_priority = state == Qt.CheckState.Checked.value
-        self.update_display_text()
-
-    def reverse_order(self):
-        """Toggle reversed visual display (does not modify the file)."""
-        self.display_reversed = not self.display_reversed
-        self.load_modlist()  # Reload with new display order
-
-    def on_rows_moved(self):
-        """Handle drag and drop reordering."""
-        self.update_display_text()
-        self.save_modlist()
-
-    def on_item_changed(self, item):
-        """Handle checkbox state changes."""
-        self.save_modlist()
-
-    def move_up(self):
-        """Move the selected mod up in the list (higher priority)."""
-        current_row = self.list_widget.currentRow()
-        if current_row <= 0:
-            return
-
-        # Block signals to prevent multiple saves
-        self.list_widget.blockSignals(True)
-
-        # Take the item and insert it above
-        item = self.list_widget.takeItem(current_row)
-        self.list_widget.insertItem(current_row - 1, item)
-        self.list_widget.setCurrentRow(current_row - 1)
-
-        self.list_widget.blockSignals(False)
-        self.update_display_text()
-        self.save_modlist()
-
-    def move_down(self):
-        """Move the selected mod down in the list (lower priority)."""
-        current_row = self.list_widget.currentRow()
-        if current_row < 0 or current_row >= self.list_widget.count() - 1:
-            return
-
-        # Block signals to prevent multiple saves
-        self.list_widget.blockSignals(True)
-
-        # Take the item and insert it below
-        item = self.list_widget.takeItem(current_row)
-        self.list_widget.insertItem(current_row + 1, item)
-        self.list_widget.setCurrentRow(current_row + 1)
-
-        self.list_widget.blockSignals(False)
-        self.update_display_text()
-        self.save_modlist()
-
-    def save_modlist(self):
-        """Save the current list back to modlist.txt."""
-        if not self.modlist_path:
-            return
-
-        try:
-            # Collect items in display order
-            items_data = []
-            for i in range(self.list_widget.count()):
-                item = self.list_widget.item(i)
-                mod_name = item.data(Qt.ItemDataRole.UserRole)
-                is_enabled = item.checkState() == Qt.CheckState.Checked
-                items_data.append({'name': mod_name, 'enabled': is_enabled})
-
-            # If display is reversed, reverse back to get file order
-            if self.display_reversed:
-                items_data = list(reversed(items_data))
-
-            # Write to file
-            lines = []
-            for data in items_data:
-                prefix = '+' if data['enabled'] else '-'
-                lines.append(f"{prefix}{data['name']}\n")
-
-            with open(self.modlist_path, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
-
-            # Update status
-            enabled_count = sum(1 for d in items_data if d['enabled'])
-            view_mode = " (reversed view)" if self.display_reversed else ""
-            self.status_label.setText(f"{enabled_count}/{len(items_data)} mods enabled (saved){view_mode}")
-
-        except Exception as e:
-            self.status_label.setText(f"Save error: {str(e)}")
-
-
-class PluginsPanel(QFrame):
-    """Panel to display and edit plugins.txt contents."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.plugins_path = None
-        self.show_priority = True
-        self.display_reversed = False  # Visual only - doesn't affect file
-        self.init_ui()
-
-    def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-
-        # Header
-        header_layout = QHBoxLayout()
-        header_label = QLabel("Plugin List")
-        header_label.setStyleSheet("font-weight: bold; font-size: 12px;")
-        header_layout.addWidget(header_label)
-
-        # Refresh button
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setMaximumWidth(60)
-        refresh_btn.clicked.connect(self.load_plugins)
-        header_layout.addWidget(refresh_btn)
-
-        layout.addLayout(header_layout)
-
-        # Options row
-        options_layout = QHBoxLayout()
-
-        # Show priority checkbox
-        self.priority_checkbox = QCheckBox("Show Priority")
-        self.priority_checkbox.setChecked(True)
-        self.priority_checkbox.stateChanged.connect(self.on_priority_toggle)
-        options_layout.addWidget(self.priority_checkbox)
-
-        options_layout.addStretch()
-
-        # Reverse order button
-        self.reverse_btn = QPushButton("Reverse Order")
-        self.reverse_btn.setMaximumWidth(100)
-        self.reverse_btn.clicked.connect(self.reverse_order)
-        options_layout.addWidget(self.reverse_btn)
-
-        layout.addLayout(options_layout)
-
-        # Plugin list widget with drag and drop
-        self.list_widget = QListWidget()
-        self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        self.list_widget.itemChanged.connect(self.on_item_changed)
-        # Enable drag and drop reordering
-        self.list_widget.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.list_widget.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.list_widget.model().rowsMoved.connect(self.on_rows_moved)
-        layout.addWidget(self.list_widget)
-
-        # Move buttons
-        buttons_layout = QHBoxLayout()
-
-        self.move_up_btn = QPushButton("Move Up")
-        self.move_up_btn.clicked.connect(self.move_up)
-        buttons_layout.addWidget(self.move_up_btn)
-
-        self.move_down_btn = QPushButton("Move Down")
-        self.move_down_btn.clicked.connect(self.move_down)
-        buttons_layout.addWidget(self.move_down_btn)
-
-        layout.addLayout(buttons_layout)
-
-        # Status label
-        self.status_label = QLabel("No plugins loaded")
-        self.status_label.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(self.status_label)
-
-    def set_plugins_path(self, path):
-        """Set the path to plugins.txt and load it."""
-        self.plugins_path = path
-        self.load_plugins()
-
-    def load_plugins(self):
-        """Load and display the plugins.txt contents."""
-        # Block signals while populating to prevent unnecessary saves
-        self.list_widget.blockSignals(True)
-        self.list_widget.clear()
-
-        if not self.plugins_path or not os.path.isfile(self.plugins_path):
-            self.status_label.setText("No plugins loaded")
-            self.list_widget.blockSignals(False)
-            return
-
-        try:
-            with open(self.plugins_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-
-            # Parse plugins from file
-            plugins_data = []
-            enabled_count = 0
-
-            for line in lines:
-                line = line.rstrip('\n\r')
-                if not line.strip():
-                    continue
-
-                # Skip comment lines
-                if line.strip().startswith('#'):
-                    continue
-
-                # Check if plugin is enabled (starts with *)
-                if line.startswith('*'):
-                    plugin_name = line[1:].strip()
-                    plugins_data.append({'name': plugin_name, 'enabled': True})
-                    enabled_count += 1
-                else:
-                    plugin_name = line.strip()
-                    plugins_data.append({'name': plugin_name, 'enabled': False})
-
-            # If display is reversed, show in reverse order (but file order is preserved)
-            if self.display_reversed:
-                plugins_data = list(reversed(plugins_data))
-
-            # Populate the list widget
-            for plugin in plugins_data:
-                item = QListWidgetItem()
-                item.setData(Qt.ItemDataRole.UserRole, plugin['name'])
-                item.setCheckState(Qt.CheckState.Checked if plugin['enabled'] else Qt.CheckState.Unchecked)
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                self.list_widget.addItem(item)
-
-            # Update display text with priority numbers
-            self.update_display_text()
-
-            view_mode = " (reversed view)" if self.display_reversed else ""
-            self.status_label.setText(f"{enabled_count}/{len(plugins_data)} plugins enabled{view_mode}")
-
-        except Exception as e:
-            self.status_label.setText(f"Error: {str(e)}")
-        finally:
-            self.list_widget.blockSignals(False)
-
-    def update_display_text(self):
-        """Update the display text for all items based on priority setting.
-
-        Priority is calculated from the top of the file (top = 0 = loads first).
-        For plugins, lower numbers load first.
-        """
-        self.list_widget.blockSignals(True)
-        total_count = self.list_widget.count()
-        for i in range(total_count):
-            item = self.list_widget.item(i)
-            plugin_name = item.data(Qt.ItemDataRole.UserRole)
-            # Calculate priority based on file position
-            if self.display_reversed:
-                # In reversed view, item 0 in display is the last in file
-                priority = total_count - 1 - i
-            else:
-                # In normal view, item 0 in display is first in file (priority 0)
-                priority = i
-            if self.show_priority:
-                item.setText(f"[{priority}] {plugin_name}")
-            else:
-                item.setText(plugin_name)
-        self.list_widget.blockSignals(False)
-
-    def on_priority_toggle(self, state):
-        """Handle priority checkbox toggle."""
-        self.show_priority = state == Qt.CheckState.Checked.value
-        self.update_display_text()
-
-    def reverse_order(self):
-        """Toggle reversed visual display (does not modify the file)."""
-        self.display_reversed = not self.display_reversed
-        self.load_plugins()  # Reload with new display order
-
-    def on_rows_moved(self):
-        """Handle drag and drop reordering."""
-        self.update_display_text()
-        self.save_plugins()
-
-    def on_item_changed(self, item):
-        """Handle checkbox state changes."""
-        self.save_plugins()
-
-    def move_up(self):
-        """Move the selected plugin up in the list."""
-        current_row = self.list_widget.currentRow()
-        if current_row <= 0:
-            return
-
-        # Block signals to prevent multiple saves
-        self.list_widget.blockSignals(True)
-
-        # Take the item and insert it above
-        item = self.list_widget.takeItem(current_row)
-        self.list_widget.insertItem(current_row - 1, item)
-        self.list_widget.setCurrentRow(current_row - 1)
-
-        self.list_widget.blockSignals(False)
-        self.update_display_text()
-        self.save_plugins()
-
-    def move_down(self):
-        """Move the selected plugin down in the list."""
-        current_row = self.list_widget.currentRow()
-        if current_row < 0 or current_row >= self.list_widget.count() - 1:
-            return
-
-        # Block signals to prevent multiple saves
-        self.list_widget.blockSignals(True)
-
-        # Take the item and insert it below
-        item = self.list_widget.takeItem(current_row)
-        self.list_widget.insertItem(current_row + 1, item)
-        self.list_widget.setCurrentRow(current_row + 1)
-
-        self.list_widget.blockSignals(False)
-        self.update_display_text()
-        self.save_plugins()
-
-    def save_plugins(self):
-        """Save the current list back to plugins.txt."""
-        if not self.plugins_path:
-            return
-
-        try:
-            # Collect items in display order
-            items_data = []
-            for i in range(self.list_widget.count()):
-                item = self.list_widget.item(i)
-                plugin_name = item.data(Qt.ItemDataRole.UserRole)
-                is_enabled = item.checkState() == Qt.CheckState.Checked
-                items_data.append({'name': plugin_name, 'enabled': is_enabled})
-
-            # If display is reversed, reverse back to get file order
-            if self.display_reversed:
-                items_data = list(reversed(items_data))
-
-            # Write to file
-            lines = []
-            for data in items_data:
-                if data['enabled']:
-                    lines.append(f"*{data['name']}\n")
-                else:
-                    lines.append(f"{data['name']}\n")
-
-            with open(self.plugins_path, 'w', encoding='utf-8') as f:
-                f.writelines(lines)
-
-            # Update status
-            enabled_count = sum(1 for d in items_data if d['enabled'])
-            view_mode = " (reversed view)" if self.display_reversed else ""
-            self.status_label.setText(f"{enabled_count}/{len(items_data)} plugins enabled (saved){view_mode}")
-
-        except Exception as e:
-            self.status_label.setText(f"Save error: {str(e)}")
+            if item.data(Qt.ItemDataRole.UserRole) == path:
+                self.list_widget.setCurrentItem(item)
+                return True
+        return False
+
+    def current_path(self):
+        """Return the folder_path of the currently selected instance, or None."""
+        item = self.list_widget.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
 
 
 class MO2MergerGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Bethesda Modding Tool for Steam Deck / Linux")
-        self.setMinimumSize(1000, 800)
+        self.setMinimumSize(860, 800)
 
         # Store paths
         self.mo2_path = ""
@@ -564,54 +123,26 @@ class MO2MergerGUI(QMainWindow):
         main_layout = QHBoxLayout(central_widget)
         main_layout.setSpacing(10)
 
-        # Create a splitter to allow resizing between left panel and modlist
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Instance panel (left sidebar)
+        self.mo2_instances = utils.scan_for_mo2_instances()
+        self.instance_panel = InstancePanel()
+        self.instance_panel.setMaximumWidth(280)
+        self.instance_panel.set_instances(self.mo2_instances)
+        self.instance_panel.instance_selected.connect(self.on_instance_selected)
+        self.instance_panel.rescan_btn.clicked.connect(self.rescan_mo2_instances)
+        self.instance_panel.refresh_btn.clicked.connect(self.refresh_gui)
+        self.instance_panel.add_btn.clicked.connect(self.add_mo2_instance)
+        main_layout.addWidget(self.instance_panel)
 
-        # Left panel (main controls)
-        left_panel = QWidget()
-        layout = QVBoxLayout(left_panel)
+        # Main controls panel
+        main_controls = QWidget()
+        layout = QVBoxLayout(main_controls)
         layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 0, 0)
 
         # MO2 Location Group
         mo2_group = QGroupBox("Mod Organizer 2 Location")
         mo2_layout = QVBoxLayout()
-
-        # Scan for MO2 instances
-        self.mo2_instances = utils.scan_for_mo2_instances()
-
-        # MO2 instance selector
-        mo2_select_layout = QHBoxLayout()
-        mo2_select_layout.addWidget(QLabel("Instance:"))
-        self.mo2_combo = QComboBox()
-        self.mo2_combo.setMinimumWidth(300)
-
-        # Add found instances
-        for display_name, folder_path in self.mo2_instances:
-            self.mo2_combo.addItem(display_name, folder_path)
-
-        self.mo2_combo.currentIndexChanged.connect(self.on_mo2_combo_changed)
-        mo2_select_layout.addWidget(self.mo2_combo)
-
-        # Rescan button
-        rescan_btn = QPushButton("Rescan")
-        rescan_btn.setToolTip("Scan /home/ for Mod Organizer 2 installations")
-        rescan_btn.clicked.connect(self.rescan_mo2_instances)
-        mo2_select_layout.addWidget(rescan_btn)
-
-        # Refresh button
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setToolTip("Refresh mod lists, plugin lists, and folder status")
-        refresh_btn.clicked.connect(self.refresh_gui)
-        mo2_select_layout.addWidget(refresh_btn)
-
-        mo2_layout.addLayout(mo2_select_layout)
-
-        # Full path label (shows the complete path of selected instance)
-        self.mo2_path_label = QLabel("Path: Not selected")
-        self.mo2_path_label.setStyleSheet("color: gray; font-size: 11px;")
-        self.mo2_path_label.setWordWrap(True)
-        mo2_layout.addWidget(self.mo2_path_label)
 
         # Instance action buttons row
         instance_btn_layout = QHBoxLayout()
@@ -622,12 +153,6 @@ class MO2MergerGUI(QMainWindow):
         self.run_mo2_btn.setToolTip("Launch ModOrganizer.exe using the game's Proton version")
         self.run_mo2_btn.clicked.connect(self.run_mo2)
         instance_btn_layout.addWidget(self.run_mo2_btn)
-
-        # Add Instance button
-        self.add_instance_btn = QPushButton("Add Instance")
-        self.add_instance_btn.setToolTip("Download and install a new Mod Organizer 2 instance")
-        self.add_instance_btn.clicked.connect(self.add_mo2_instance)
-        instance_btn_layout.addWidget(self.add_instance_btn)
 
         # Open Instance Folder button
         self.open_instance_btn = QPushButton("Open Folder")
@@ -725,12 +250,10 @@ class MO2MergerGUI(QMainWindow):
 
         # Set initial state based on found instances
         if self.mo2_instances:
-            # Auto-select first instance
-            self.mo2_combo.setCurrentIndex(0)
             self.mo2_path = self.mo2_instances[0][1]
-            self.mo2_path_label.setText(f"Path: {self.mo2_instances[0][1]}")
+            self.instance_panel.list_widget.setCurrentRow(0)
         else:
-            self.mo2_path_label.setText("Path: No instances found - use Rescan or Add Instance")
+            self.instance_panel.path_label.setText("No instances found - use Add Instance")
 
         # Profile Selection Group
         profile_group = QGroupBox("Profile Selection")
@@ -880,77 +403,35 @@ class MO2MergerGUI(QMainWindow):
         log_group.setLayout(log_layout)
         layout.addWidget(log_group)
 
-        # Add left panel to splitter
-        splitter.addWidget(left_panel)
-
-        # Create a vertical splitter for the two right panels (modlist and plugins)
-        right_splitter = QSplitter(Qt.Orientation.Vertical)
-
-        # Create and add the modlist panel
-        self.modlist_panel = ModlistPanel()
-        right_splitter.addWidget(self.modlist_panel)
-
-        # Create and add the plugins panel
-        self.plugins_panel = PluginsPanel()
-        right_splitter.addWidget(self.plugins_panel)
-
-        # Set equal sizes for modlist and plugins panels
-        right_splitter.setSizes([400, 400])
-
-        # Add right splitter to main splitter
-        splitter.addWidget(right_splitter)
-
-        # Set initial splitter sizes (left panel larger than right panels)
-        splitter.setSizes([600, 400])
-
-        # Add splitter to main layout
-        main_layout.addWidget(splitter)
+        # Add main controls panel to layout
+        main_layout.addWidget(main_controls)
 
         # Trigger initial validation now that all UI elements exist
         if self.mo2_path:
             self.validate_mo2_folder()
 
-    def on_mo2_combo_changed(self, index):
-        """Handle MO2 instance selection change."""
-        folder_path = self.mo2_combo.currentData()
-
+    def on_instance_selected(self, folder_path):
+        """Handle instance selection from the InstancePanel."""
         if folder_path:
             self.mo2_path = folder_path
-            self.mo2_path_label.setText(f"Path: {folder_path}")
             self.validate_mo2_folder()
 
     def rescan_mo2_instances(self):
-        """Rescan for MO2 instances and update the combo box."""
-        # Remember current selection if possible
-        current_path = self.mo2_combo.currentData()
+        """Rescan for MO2 instances and update the instance panel."""
+        current_path = self.instance_panel.current_path()
 
-        # Rescan
         self.mo2_instances = utils.scan_for_mo2_instances()
-
-        # Update combo box
-        self.mo2_combo.blockSignals(True)
-        self.mo2_combo.clear()
-
-        for display_name, folder_path in self.mo2_instances:
-            self.mo2_combo.addItem(display_name, folder_path)
+        self.instance_panel.set_instances(self.mo2_instances)
 
         # Try to restore previous selection
         restored = False
         if current_path:
-            for i in range(self.mo2_combo.count()):
-                if self.mo2_combo.itemData(i) == current_path:
-                    self.mo2_combo.setCurrentIndex(i)
-                    restored = True
-                    break
+            restored = self.instance_panel.select_by_path(current_path)
 
-        self.mo2_combo.blockSignals(False)
-
-        # Update UI based on results
         if self.mo2_instances and not restored:
-            self.mo2_combo.setCurrentIndex(0)
-            self.on_mo2_combo_changed(0)
+            self.instance_panel.list_widget.setCurrentRow(0)
         elif not self.mo2_instances:
-            self.mo2_path_label.setText("Path: No instances found - use Rescan or Add Instance")
+            self.instance_panel.path_label.setText("No instances found - use Add Instance")
 
         # Show message about scan results
         if self.mo2_instances:
@@ -1686,7 +1167,7 @@ class MO2MergerGUI(QMainWindow):
         self.log_text.clear()
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
-        self.add_instance_btn.setEnabled(False)
+        self.instance_panel.add_btn.setEnabled(False)
 
         self.download_worker = utils.DownloadWorker(folder, selected_game_data, local_archive=local_archive)
         self.download_worker.output_signal.connect(self.append_log)
@@ -1997,7 +1478,7 @@ class MO2MergerGUI(QMainWindow):
         """Handle download completion."""
         self.progress_bar.setVisible(False)
         self.progress_bar.setRange(0, 0)  # Reset to indeterminate
-        self.add_instance_btn.setEnabled(True)
+        self.instance_panel.add_btn.setEnabled(True)
 
         if success:
             QMessageBox.information(
@@ -2110,26 +1591,18 @@ class MO2MergerGUI(QMainWindow):
         if os.path.isfile(modlist_path):
             self.modlist_status_label.setText(f"modlist.txt: Found")
             self.modlist_status_label.setStyleSheet("color: green;")
-            # Update the modlist panel with the new modlist path
-            self.modlist_panel.set_modlist_path(modlist_path)
         else:
             self.modlist_status_label.setText("modlist.txt: Not found")
             self.modlist_status_label.setStyleSheet("color: red;")
-            # Clear the modlist panel
-            self.modlist_panel.set_modlist_path(None)
 
         # Check for plugins.txt
         plugins_path = os.path.join(profile_path, "plugins.txt")
         if os.path.isfile(plugins_path):
             self.plugins_status_label.setText(f"plugins.txt: Found")
             self.plugins_status_label.setStyleSheet("color: green;")
-            # Update the plugins panel with the new plugins path
-            self.plugins_panel.set_plugins_path(plugins_path)
         else:
             self.plugins_status_label.setText("plugins.txt: Not found")
             self.plugins_status_label.setStyleSheet("color: red;")
-            # Clear the plugins panel
-            self.plugins_panel.set_plugins_path(None)
 
     def auto_detect_game(self, profile_path):
         """
